@@ -1,0 +1,19 @@
+# Local build and runtime output; source and license files remain visible.
+/build/
+/evidence/
+/profiles/
+/.tools/
+/.codex/
+/.venv/
+__pycache__/
+*.py[cod]
+*.log
+*.jsonl
+*.sqlite*
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*
+*.pem
+*.key

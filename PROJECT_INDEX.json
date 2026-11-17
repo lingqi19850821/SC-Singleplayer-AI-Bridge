@@ -1,0 +1,7 @@
+{
+  "scapi": "Restricted Python game API, observation, tickets, automatic information and knowledge storage.",
+  "native": "Native x86 bridge, protocol and bounded loader source.",
+  "tools": "API transport, capture and lifecycle safety helpers, and offline native build script.",
+  "docs": "Public API integration contract and source-derived interface reference.",
+  "LICENSES": "Third-party license texts accompanying the project license."
+}

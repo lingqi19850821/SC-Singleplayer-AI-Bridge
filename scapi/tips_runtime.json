@@ -1,0 +1,797 @@
+{
+  "schema": "scapi.tips.runtime.v1",
+  "language": "en",
+  "source": "user-selected 61 original-game Tips; T029 removed by human; T050/T052 merged",
+  "items": [
+    {
+      "id": "T001",
+      "source_ids": [
+        "T001"
+      ],
+      "text": "After selecting units, use right_click on a position or target in the currently actionable view. The game chooses an action such as moving, attacking, or working based on the target and unit context.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T002",
+      "source_ids": [
+        "T002"
+      ],
+      "text": "Before gathering gas, build the appropriate Refinery, Extractor, or Assimilator on a Vespene Geyser.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Protoss Assimilator",
+        "Terran Refinery",
+        "Vespene Geyser",
+        "Zerg Extractor"
+      ],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T003",
+      "source_ids": [
+        "T003"
+      ],
+      "text": "Read the current command_card and use activate_button with a button that is currently available. For commands that request a target, use the returned target ticket.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T004",
+      "source_ids": [
+        "T004"
+      ],
+      "text": "Use the lifecycle restart operation to restart the current mission. Restart discards unsaved current progress and invalidates old action/session references.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": [
+        "restart"
+      ]
+    },
+    {
+      "id": "T005",
+      "source_ids": [
+        "T005"
+      ],
+      "text": "Use the lifecycle objectives operation to read the current mission objectives.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": [
+        "objectives"
+      ]
+    },
+    {
+      "id": "T006",
+      "source_ids": [
+        "T006"
+      ],
+      "text": "Terran infantry can enter a Bunker, where they are sheltered and can return fire. Select the infantry and use right_click on the Bunker.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Terran Bunker",
+        "Terran Firebat",
+        "Terran Ghost",
+        "Terran Marine"
+      ],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T007",
+      "source_ids": [
+        "T007"
+      ],
+      "text": "A Vulture can deploy Spider Mines. Select it and use the Use Spider Mines button shown on the current command_card; if the command requests a target, use target_at to designate ground.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Terran Vulture",
+        "Vulture Spider Mine"
+      ],
+      "button_names": [
+        "Use Spider Mines"
+      ],
+      "requires": []
+    },
+    {
+      "id": "T008",
+      "source_ids": [
+        "T008"
+      ],
+      "text": "Select a building and use the required production button on its current command_card to add a unit to the production queue. The original Tip says the queue holds up to five items.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T009",
+      "source_ids": [
+        "T009"
+      ],
+      "text": "Stimpack increases the attack and movement rates of Marines and Firebats. Each use costs 10 hit points.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Terran Firebat",
+        "Terran Marine"
+      ],
+      "button_names": [
+        "Use Stim Packs"
+      ],
+      "requires": []
+    },
+    {
+      "id": "T010",
+      "source_ids": [
+        "T010"
+      ],
+      "text": "Some missions require specific units to reach a glowing Command Point Marker (Beacon).",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Protoss Beacon",
+        "Protoss Flag Beacon",
+        "Protoss Marker",
+        "Terran Beacon",
+        "Terran Flag Beacon",
+        "Terran Marker",
+        "Zerg Beacon",
+        "Zerg Flag Beacon",
+        "Zerg Marker"
+      ],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T011",
+      "source_ids": [
+        "T011"
+      ],
+      "text": "When building a Command Center, Nexus, or Hatchery, try to place it close to resources.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Protoss Nexus",
+        "Terran Command Center",
+        "Zerg Hatchery"
+      ],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T012",
+      "source_ids": [
+        "T012"
+      ],
+      "text": "Wraiths and Ghosts can use Cloak. The original Tip says cloaked units cannot be attacked unless enemy detection units spot them.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Terran Ghost",
+        "Terran Wraith"
+      ],
+      "button_names": [
+        "Cloak"
+      ],
+      "requires": []
+    },
+    {
+      "id": "T013",
+      "source_ids": [
+        "T013"
+      ],
+      "text": "Read the current production queue, then use its production ticket and queue position with cancel_production to cancel one item at a time.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T014",
+      "source_ids": [
+        "T014"
+      ],
+      "text": "A Dropship transports units quickly and is built at a Starport. Select one or more units, then use right_click on the Dropship to load them.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Terran Dropship",
+        "Terran Starport"
+      ],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T015",
+      "source_ids": [
+        "T015"
+      ],
+      "text": "Use move_selected to move units; they ignore enemies along the way. This can also be used to retreat.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T016",
+      "source_ids": [
+        "T016"
+      ],
+      "text": "Many Terran buildings can fly. Select a building and use the Liftoff button shown on its current command_card. To land, use the available Land button and specify a location.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T017",
+      "source_ids": [
+        "T017"
+      ],
+      "text": "To have units engage enemies along the way, use attack_move on a target position.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T018",
+      "source_ids": [
+        "T018"
+      ],
+      "text": "You can land a friendly building beside a corresponding abandoned Terran add-on to take it over, such as a Machine Shop or Control Tower.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Terran Control Tower",
+        "Terran Machine Shop"
+      ],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T019",
+      "source_ids": [
+        "T019"
+      ],
+      "text": "A Nuclear Silo is an add-on to a Command Center. To launch a nuclear attack, first build a nuclear missile in the Silo, then designate a target with a Ghost.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Nuclear Missile",
+        "Terran Command Center",
+        "Terran Ghost",
+        "Terran Nuclear Silo"
+      ],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T020",
+      "source_ids": [
+        "T020"
+      ],
+      "text": "Use select_at with add=True to apply the native Shift-selection toggle to a unit in view, removing it from the current selection if selected.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T021",
+      "source_ids": [
+        "T021"
+      ],
+      "text": "Use select_at to select a target on the current screen.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T022",
+      "source_ids": [
+        "T022"
+      ],
+      "text": "Missile Turrets and Science Vessels detect cloaked units within range. A Comsat Station's Scanner Sweep can briefly detect units at a location on the map.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Terran Comsat Station",
+        "Terran Missile Turret",
+        "Terran Science Vessel"
+      ],
+      "button_names": [
+        "Scanner Sweep (Detector)"
+      ],
+      "requires": []
+    },
+    {
+      "id": "T023",
+      "source_ids": [
+        "T023"
+      ],
+      "text": "Select passengers and use right_click on a compatible friendly transport to load them. You can also specify passengers with the transport's current Load button.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T024",
+      "source_ids": [
+        "T024"
+      ],
+      "text": "Select a transport, read its current cargo from command_card, and use a passenger ticket with unload_one. To unload all, use the currently available Unload All button and specify an on-screen location if the interface requires one.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T025",
+      "source_ids": [
+        "T025"
+      ],
+      "text": "Zerg buildings must be built on creep, except for Hatcheries and Extractors. A Hatchery or creep colony can generate creep.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Zerg Creep Colony",
+        "Zerg Extractor",
+        "Zerg Hatchery"
+      ],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T026",
+      "source_ids": [
+        "T026"
+      ],
+      "text": "Use move_minimap, attack_move_minimap, or patrol_minimap to issue an order to a minimap position without first moving the main camera. GATHER is not available as a public minimap command.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T027",
+      "source_ids": [
+        "T027"
+      ],
+      "text": "Use camera to move the camera.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T028",
+      "source_ids": [
+        "T028"
+      ],
+      "text": "A Hatchery can be upgraded to a Lair and then to a Hive. These upgrades unlock more Zerg buildings.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Zerg Hatchery",
+        "Zerg Hive",
+        "Zerg Lair"
+      ],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T030",
+      "source_ids": [
+        "T030"
+      ],
+      "text": "Use lifecycle save and load operations to preserve and restore game progress. After loading, discard old session references and obtain current observations.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": [
+        "save",
+        "load"
+      ]
+    },
+    {
+      "id": "T031",
+      "source_ids": [
+        "T031"
+      ],
+      "text": "An Overlord can research a transport upgrade at a Lair or Hive. After the upgrade, select passengers and use right_click on a compatible friendly Overlord to load them.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Zerg Hive",
+        "Zerg Lair",
+        "Zerg Overlord"
+      ],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T032",
+      "source_ids": [
+        "T032"
+      ],
+      "text": "A Queen can Infest a severely damaged Terran Command Center. It becomes a Zerg building that can produce Infested Terrans, which explode when they attack.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Infested Terran",
+        "Terran Command Center",
+        "Zerg Queen"
+      ],
+      "button_names": [
+        "Infest Terran Command Center"
+      ],
+      "requires": []
+    },
+    {
+      "id": "T033",
+      "source_ids": [
+        "T033"
+      ],
+      "text": "Use queued=True for Move, Attack, Patrol or right_click to append native orders. Each item costs an action. New-building placement does not support queued orders or automatic background continuation.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T034",
+      "source_ids": [
+        "T034"
+      ],
+      "text": "Use patrol or patrol_minimap to set a patrol destination. Patrolling units attack enemies they discover.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T035",
+      "source_ids": [
+        "T035"
+      ],
+      "text": "The original Tip says most Zerg ground units can Burrow. Burrowed units cannot attack and cannot be attacked while undetected.",
+      "gate": "any_known_name",
+      "unit_names": [],
+      "button_names": [
+        "Burrow"
+      ],
+      "requires": []
+    },
+    {
+      "id": "T036",
+      "source_ids": [
+        "T036"
+      ],
+      "text": "Stationary combat units are on guard and automatically engage enemies they discover.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T037",
+      "source_ids": [
+        "T037"
+      ],
+      "text": "Select a unit and issue the currently available Hold Position button from its command_card. The unit attacks enemies within range while staying in place.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T038",
+      "source_ids": [
+        "T038"
+      ],
+      "text": "After a Spire is upgraded to a Greater Spire, Mutalisks can morph into Guardians.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Zerg Greater Spire",
+        "Zerg Guardian",
+        "Zerg Mutalisk",
+        "Zerg Spire"
+      ],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T039",
+      "source_ids": [
+        "T039"
+      ],
+      "text": "Select an escort unit and use right_click on the friendly unit it should follow. The result depends on the unit and target state.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T040",
+      "source_ids": [
+        "T040"
+      ],
+      "text": "A Defiler can Consume a friendly unit. Each unit consumed restores 50 energy.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Zerg Defiler"
+      ],
+      "button_names": [
+        "Consume"
+      ],
+      "requires": []
+    },
+    {
+      "id": "T041",
+      "source_ids": [
+        "T041"
+      ],
+      "text": "PLAGUE can deal up to 300 damage to units or buildings, but it cannot kill its target.",
+      "gate": "any_known_name",
+      "unit_names": [],
+      "button_names": [
+        "Plague"
+      ],
+      "requires": []
+    },
+    {
+      "id": "T042",
+      "source_ids": [
+        "T042"
+      ],
+      "text": "Scourge automatically attack nearby air units while patrolling. Use patrol to issue a patrol order.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Zerg Scourge"
+      ],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T043",
+      "source_ids": [
+        "T043"
+      ],
+      "text": "A Queen's ENSNARE and a Defiler's PLAGUE can affect cloaked units, allowing other units to target them.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Zerg Defiler",
+        "Zerg Queen"
+      ],
+      "button_names": [
+        "Ensnare",
+        "Plague"
+      ],
+      "requires": []
+    },
+    {
+      "id": "T044",
+      "source_ids": [
+        "T044"
+      ],
+      "text": "Keep the route between the Command Center and resources clear. Obstacles slow resource delivery.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Terran Command Center"
+      ],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T045",
+      "source_ids": [
+        "T045"
+      ],
+      "text": "Protoss buildings must be built within a Pylon's power field, except for the Nexus.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Protoss Nexus",
+        "Protoss Pylon"
+      ],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T046",
+      "source_ids": [
+        "T046"
+      ],
+      "text": "Use save_view for one of three camera bookmarks, and recall_view to return. Store labels and notes with explicit text budgets. Bookmarks remain camera coordinates, not unit positions.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T047",
+      "source_ids": [
+        "T047"
+      ],
+      "text": "Reavers attack by firing explosive Scarabs. Select a Reaver and use the Build Scarab button shown on its current command_card to produce them.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Protoss Reaver",
+        "Protoss Scarab"
+      ],
+      "button_names": [
+        "Build Scarab"
+      ],
+      "requires": []
+    },
+    {
+      "id": "T048",
+      "source_ids": [
+        "T048"
+      ],
+      "text": "Different units can support one another. A mixed force may be more effective than a force made of only one unit type.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T049",
+      "source_ids": [
+        "T049"
+      ],
+      "text": "After a Probe starts warping in a building, it can take another task. This lets it start multiple buildings at once.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Protoss Probe"
+      ],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T050",
+      "source_ids": [
+        "T050",
+        "T052"
+      ],
+      "text": "Use select_same_type to select up to twelve units of the same type on the current screen, following native selection rules.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T051",
+      "source_ids": [
+        "T051"
+      ],
+      "text": "PSIONIC STORM damages all units in its area of effect and is effective against tightly grouped enemies.",
+      "gate": "any_known_name",
+      "unit_names": [],
+      "button_names": [
+        "Psionic Storm"
+      ],
+      "requires": []
+    },
+    {
+      "id": "T053",
+      "source_ids": [
+        "T053"
+      ],
+      "text": "Two High Templars can combine into an Archon. Select both and use the Archon Warp button shown on the current command_card.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Protoss Archon",
+        "Protoss High Templar"
+      ],
+      "button_names": [
+        "Archon Warp"
+      ],
+      "requires": []
+    },
+    {
+      "id": "T054",
+      "source_ids": [
+        "T054"
+      ],
+      "text": "When a public event supplies camera_target, pass its x,y to camera to view the notification location. A notification without camera_target gives no camera destination.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T055",
+      "source_ids": [
+        "T055"
+      ],
+      "text": "HALLUCINATION creates multiple illusions of a unit. Use them to scout and draw enemy fire as decoys.",
+      "gate": "any_known_name",
+      "unit_names": [],
+      "button_names": [
+        "Hallucination"
+      ],
+      "requires": []
+    },
+    {
+      "id": "T056",
+      "source_ids": [
+        "T056"
+      ],
+      "text": "Use assign_group with the current selection and a slot from 0 through 9. Use select_group to recall that native group. Groups can contain units or buildings; a new game or load invalidates old action/session references.",
+      "gate": "startup",
+      "unit_names": [],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T057",
+      "source_ids": [
+        "T057"
+      ],
+      "text": "Observers are useful for scouting: they remain permanently cloaked and can detect hidden units.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Protoss Observer"
+      ],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T058",
+      "source_ids": [
+        "T058"
+      ],
+      "text": "Carriers attack by launching Interceptors. Select a Carrier and use the Build Interceptor button shown on its current command_card to produce them.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Protoss Carrier",
+        "Protoss Interceptor"
+      ],
+      "button_names": [
+        "Build Interceptor"
+      ],
+      "requires": []
+    },
+    {
+      "id": "T059",
+      "source_ids": [
+        "T059"
+      ],
+      "text": "An Arbiter cloaks nearby units but remains visible itself. Arbiters cannot cloak one another.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Protoss Arbiter"
+      ],
+      "button_names": [],
+      "requires": []
+    },
+    {
+      "id": "T060",
+      "source_ids": [
+        "T060"
+      ],
+      "text": "Units caught in an Arbiter's Stasis Field can neither attack nor be attacked while the effect lasts.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Protoss Arbiter"
+      ],
+      "button_names": [
+        "Stasis Field"
+      ],
+      "requires": []
+    },
+    {
+      "id": "T061",
+      "source_ids": [
+        "T061"
+      ],
+      "text": "Arbiters can use Recall to teleport units instantly to their location.",
+      "gate": "any_known_name",
+      "unit_names": [
+        "Protoss Arbiter"
+      ],
+      "button_names": [
+        "Recall"
+      ],
+      "requires": []
+    }
+  ]
+}

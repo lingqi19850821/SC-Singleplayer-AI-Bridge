@@ -1,0 +1,1444 @@
+{
+  "schema": "scapi-terrain-label-reference-v1",
+  "status": "static_reference_only_not_target_runtime_verified",
+  "source": {
+    "repository": "TheNitesWhoSay/Chkdraft",
+    "commit": "7aa8c6b28255250e94b737a12d2b4def23ef2a33",
+    "path": "src/mapping_core/sc.h",
+    "license": "MIT",
+    "notice_file": "terrain_labels.LICENSE.txt"
+  },
+  "type_field": "CV5_first_u16_not_group_index_not_megatile_id",
+  "unknown_rules": [
+    "type0=unknown",
+    "type1=doodad_not_a_palette_type",
+    "unnamed_without_transition_entry=unknown",
+    "inverse_megatile_lookup_must_include_doodad_and_unused_records",
+    "multiple_matching_types=ambiguous_unknown",
+    "names_do_not_override_VF4_walkability_or_elevation"
+  ],
+  "tilesets": [
+    {
+      "era": 0,
+      "tileset": "badlands",
+      "base_types": [
+        {
+          "terrain_type": 2,
+          "palette_name": "Dirt"
+        },
+        {
+          "terrain_type": 3,
+          "palette_name": "High Dirt"
+        },
+        {
+          "terrain_type": 4,
+          "palette_name": "Mud"
+        },
+        {
+          "terrain_type": 5,
+          "palette_name": "Water"
+        },
+        {
+          "terrain_type": 6,
+          "palette_name": "Grass"
+        },
+        {
+          "terrain_type": 7,
+          "palette_name": "High Grass"
+        },
+        {
+          "terrain_type": 14,
+          "palette_name": "Asphalt"
+        },
+        {
+          "terrain_type": 15,
+          "palette_name": "Rocky Ground"
+        },
+        {
+          "terrain_type": 18,
+          "palette_name": "Structure"
+        }
+      ],
+      "transitions": [
+        {
+          "terrain_type": 35,
+          "endpoint_types": [
+            5,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Water",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 34,
+          "endpoint_types": [
+            2,
+            3
+          ],
+          "endpoint_palette_names": [
+            "Dirt",
+            "High Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 20,
+          "endpoint_types": [
+            6,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Grass",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 27,
+          "endpoint_types": [
+            14,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Asphalt",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 28,
+          "endpoint_types": [
+            15,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Rocky Ground",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 21,
+          "endpoint_types": [
+            7,
+            3
+          ],
+          "endpoint_palette_names": [
+            "High Grass",
+            "High Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 31,
+          "endpoint_types": [
+            18,
+            14
+          ],
+          "endpoint_palette_names": [
+            "Structure",
+            "Asphalt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 22,
+          "endpoint_types": [
+            4,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Mud",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        }
+      ]
+    },
+    {
+      "era": 1,
+      "tileset": "platform",
+      "base_types": [
+        {
+          "terrain_type": 2,
+          "palette_name": "Space"
+        },
+        {
+          "terrain_type": 3,
+          "palette_name": "Platform"
+        },
+        {
+          "terrain_type": 4,
+          "palette_name": "Plating"
+        },
+        {
+          "terrain_type": 5,
+          "palette_name": "High Platform"
+        },
+        {
+          "terrain_type": 6,
+          "palette_name": "High Plating"
+        },
+        {
+          "terrain_type": 7,
+          "palette_name": "Solar Array"
+        },
+        {
+          "terrain_type": 8,
+          "palette_name": "Low Platform"
+        },
+        {
+          "terrain_type": 9,
+          "palette_name": "Rusty Pit"
+        },
+        {
+          "terrain_type": 10,
+          "palette_name": "Elevated Catwalk"
+        },
+        {
+          "terrain_type": 11,
+          "palette_name": "Dark Platform"
+        }
+      ],
+      "transitions": [
+        {
+          "terrain_type": 20,
+          "endpoint_types": [
+            2,
+            3
+          ],
+          "endpoint_palette_names": [
+            "Space",
+            "Platform"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 21,
+          "endpoint_types": [
+            3,
+            5
+          ],
+          "endpoint_palette_names": [
+            "Platform",
+            "High Platform"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 16,
+          "endpoint_types": [
+            7,
+            3
+          ],
+          "endpoint_palette_names": [
+            "Solar Array",
+            "Platform"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 17,
+          "endpoint_types": [
+            8,
+            3
+          ],
+          "endpoint_palette_names": [
+            "Low Platform",
+            "Platform"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 18,
+          "endpoint_types": [
+            9,
+            3
+          ],
+          "endpoint_palette_names": [
+            "Rusty Pit",
+            "Platform"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 14,
+          "endpoint_types": [
+            4,
+            3
+          ],
+          "endpoint_palette_names": [
+            "Plating",
+            "Platform"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 15,
+          "endpoint_types": [
+            6,
+            5
+          ],
+          "endpoint_palette_names": [
+            "High Plating",
+            "High Platform"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 19,
+          "endpoint_types": [
+            10,
+            3
+          ],
+          "endpoint_palette_names": [
+            "Elevated Catwalk",
+            "Platform"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 13,
+          "endpoint_types": [
+            11,
+            3
+          ],
+          "endpoint_palette_names": [
+            "Dark Platform",
+            "Platform"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        }
+      ]
+    },
+    {
+      "era": 2,
+      "tileset": "install",
+      "base_types": [
+        {
+          "terrain_type": 2,
+          "palette_name": "Substructure"
+        },
+        {
+          "terrain_type": 3,
+          "palette_name": "Floor"
+        },
+        {
+          "terrain_type": 4,
+          "palette_name": "Substructure Plating"
+        },
+        {
+          "terrain_type": 5,
+          "palette_name": "Plating"
+        },
+        {
+          "terrain_type": 6,
+          "palette_name": "Roof"
+        },
+        {
+          "terrain_type": 7,
+          "palette_name": "Bottomless Pit"
+        },
+        {
+          "terrain_type": 8,
+          "palette_name": "Substructure Panels"
+        }
+      ],
+      "transitions": [
+        {
+          "terrain_type": 12,
+          "endpoint_types": [
+            2,
+            3
+          ],
+          "endpoint_palette_names": [
+            "Substructure",
+            "Floor"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 13,
+          "endpoint_types": [
+            6,
+            3
+          ],
+          "endpoint_palette_names": [
+            "Roof",
+            "Floor"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 10,
+          "endpoint_types": [
+            4,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Substructure Plating",
+            "Substructure"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 11,
+          "endpoint_types": [
+            5,
+            3
+          ],
+          "endpoint_palette_names": [
+            "Plating",
+            "Floor"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 14,
+          "endpoint_types": [
+            8,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Substructure Panels",
+            "Substructure"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 15,
+          "endpoint_types": [
+            7,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Bottomless Pit",
+            "Substructure"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        }
+      ]
+    },
+    {
+      "era": 3,
+      "tileset": "ashworld",
+      "base_types": [
+        {
+          "terrain_type": 2,
+          "palette_name": "Dirt"
+        },
+        {
+          "terrain_type": 3,
+          "palette_name": "Lava"
+        },
+        {
+          "terrain_type": 4,
+          "palette_name": "High Dirt"
+        },
+        {
+          "terrain_type": 5,
+          "palette_name": "High Lava"
+        },
+        {
+          "terrain_type": 6,
+          "palette_name": "Shale"
+        },
+        {
+          "terrain_type": 7,
+          "palette_name": "High Shale"
+        },
+        {
+          "terrain_type": 8,
+          "palette_name": "Magma"
+        },
+        {
+          "terrain_type": 9,
+          "palette_name": "Broken Rock"
+        }
+      ],
+      "transitions": [
+        {
+          "terrain_type": 17,
+          "endpoint_types": [
+            8,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Magma",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 11,
+          "endpoint_types": [
+            3,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Lava",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 13,
+          "endpoint_types": [
+            6,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Shale",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 15,
+          "endpoint_types": [
+            9,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Broken Rock",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 16,
+          "endpoint_types": [
+            2,
+            4
+          ],
+          "endpoint_palette_names": [
+            "Dirt",
+            "High Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 12,
+          "endpoint_types": [
+            5,
+            4
+          ],
+          "endpoint_palette_names": [
+            "High Lava",
+            "High Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 14,
+          "endpoint_types": [
+            7,
+            4
+          ],
+          "endpoint_palette_names": [
+            "High Shale",
+            "High Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        }
+      ]
+    },
+    {
+      "era": 4,
+      "tileset": "jungle",
+      "base_types": [
+        {
+          "terrain_type": 2,
+          "palette_name": "Dirt"
+        },
+        {
+          "terrain_type": 3,
+          "palette_name": "High Dirt"
+        },
+        {
+          "terrain_type": 4,
+          "palette_name": "Mud"
+        },
+        {
+          "terrain_type": 5,
+          "palette_name": "Water"
+        },
+        {
+          "terrain_type": 8,
+          "palette_name": "Jungle"
+        },
+        {
+          "terrain_type": 9,
+          "palette_name": "Raised Jungle"
+        },
+        {
+          "terrain_type": 10,
+          "palette_name": "High Jungle"
+        },
+        {
+          "terrain_type": 11,
+          "palette_name": "Ruins"
+        },
+        {
+          "terrain_type": 12,
+          "palette_name": "High Ruins"
+        },
+        {
+          "terrain_type": 13,
+          "palette_name": "High Raised Jungle"
+        },
+        {
+          "terrain_type": 15,
+          "palette_name": "Rocky Ground"
+        },
+        {
+          "terrain_type": 16,
+          "palette_name": "Temple"
+        },
+        {
+          "terrain_type": 17,
+          "palette_name": "High Temple"
+        }
+      ],
+      "transitions": [
+        {
+          "terrain_type": 35,
+          "endpoint_types": [
+            5,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Water",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 34,
+          "endpoint_types": [
+            2,
+            3
+          ],
+          "endpoint_palette_names": [
+            "Dirt",
+            "High Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 22,
+          "endpoint_types": [
+            4,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Mud",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 23,
+          "endpoint_types": [
+            8,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Jungle",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 28,
+          "endpoint_types": [
+            15,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Rocky Ground",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 29,
+          "endpoint_types": [
+            9,
+            8
+          ],
+          "endpoint_palette_names": [
+            "Raised Jungle",
+            "Jungle"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 25,
+          "endpoint_types": [
+            11,
+            8
+          ],
+          "endpoint_palette_names": [
+            "Ruins",
+            "Jungle"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 32,
+          "endpoint_types": [
+            16,
+            8
+          ],
+          "endpoint_palette_names": [
+            "Temple",
+            "Jungle"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 24,
+          "endpoint_types": [
+            10,
+            3
+          ],
+          "endpoint_palette_names": [
+            "High Jungle",
+            "High Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 26,
+          "endpoint_types": [
+            12,
+            10
+          ],
+          "endpoint_palette_names": [
+            "High Ruins",
+            "High Jungle"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 30,
+          "endpoint_types": [
+            13,
+            10
+          ],
+          "endpoint_palette_names": [
+            "High Raised Jungle",
+            "High Jungle"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 33,
+          "endpoint_types": [
+            17,
+            10
+          ],
+          "endpoint_palette_names": [
+            "High Temple",
+            "High Jungle"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        }
+      ]
+    },
+    {
+      "era": 5,
+      "tileset": "desert",
+      "base_types": [
+        {
+          "terrain_type": 2,
+          "palette_name": "Dirt"
+        },
+        {
+          "terrain_type": 3,
+          "palette_name": "High Dirt"
+        },
+        {
+          "terrain_type": 4,
+          "palette_name": "Dried Mud"
+        },
+        {
+          "terrain_type": 5,
+          "palette_name": "Tar"
+        },
+        {
+          "terrain_type": 8,
+          "palette_name": "Sand Dunes"
+        },
+        {
+          "terrain_type": 9,
+          "palette_name": "Sandy Sunken Pit"
+        },
+        {
+          "terrain_type": 10,
+          "palette_name": "High Sand Dunes"
+        },
+        {
+          "terrain_type": 11,
+          "palette_name": "Crags"
+        },
+        {
+          "terrain_type": 12,
+          "palette_name": "High Crags"
+        },
+        {
+          "terrain_type": 13,
+          "palette_name": "High Sandy Sunken Pit"
+        },
+        {
+          "terrain_type": 15,
+          "palette_name": "Rocky Ground"
+        },
+        {
+          "terrain_type": 16,
+          "palette_name": "Compound"
+        },
+        {
+          "terrain_type": 17,
+          "palette_name": "High Compound"
+        }
+      ],
+      "transitions": [
+        {
+          "terrain_type": 35,
+          "endpoint_types": [
+            5,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Tar",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 34,
+          "endpoint_types": [
+            2,
+            3
+          ],
+          "endpoint_palette_names": [
+            "Dirt",
+            "High Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 22,
+          "endpoint_types": [
+            4,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Dried Mud",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 23,
+          "endpoint_types": [
+            8,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Sand Dunes",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 28,
+          "endpoint_types": [
+            15,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Rocky Ground",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 29,
+          "endpoint_types": [
+            9,
+            8
+          ],
+          "endpoint_palette_names": [
+            "Sandy Sunken Pit",
+            "Sand Dunes"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 25,
+          "endpoint_types": [
+            11,
+            8
+          ],
+          "endpoint_palette_names": [
+            "Crags",
+            "Sand Dunes"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 32,
+          "endpoint_types": [
+            16,
+            8
+          ],
+          "endpoint_palette_names": [
+            "Compound",
+            "Sand Dunes"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 24,
+          "endpoint_types": [
+            10,
+            3
+          ],
+          "endpoint_palette_names": [
+            "High Sand Dunes",
+            "High Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 26,
+          "endpoint_types": [
+            12,
+            10
+          ],
+          "endpoint_palette_names": [
+            "High Crags",
+            "High Sand Dunes"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 30,
+          "endpoint_types": [
+            13,
+            10
+          ],
+          "endpoint_palette_names": [
+            "High Sandy Sunken Pit",
+            "High Sand Dunes"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 33,
+          "endpoint_types": [
+            17,
+            10
+          ],
+          "endpoint_palette_names": [
+            "High Compound",
+            "High Sand Dunes"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        }
+      ]
+    },
+    {
+      "era": 6,
+      "tileset": "ice",
+      "base_types": [
+        {
+          "terrain_type": 2,
+          "palette_name": "Snow"
+        },
+        {
+          "terrain_type": 3,
+          "palette_name": "High Snow"
+        },
+        {
+          "terrain_type": 4,
+          "palette_name": "Moguls"
+        },
+        {
+          "terrain_type": 5,
+          "palette_name": "Ice"
+        },
+        {
+          "terrain_type": 8,
+          "palette_name": "Dirt"
+        },
+        {
+          "terrain_type": 9,
+          "palette_name": "Water"
+        },
+        {
+          "terrain_type": 10,
+          "palette_name": "High Dirt"
+        },
+        {
+          "terrain_type": 11,
+          "palette_name": "Grass"
+        },
+        {
+          "terrain_type": 12,
+          "palette_name": "High Grass"
+        },
+        {
+          "terrain_type": 13,
+          "palette_name": "High Water"
+        },
+        {
+          "terrain_type": 15,
+          "palette_name": "Rocky Snow"
+        },
+        {
+          "terrain_type": 16,
+          "palette_name": "Outpost"
+        },
+        {
+          "terrain_type": 17,
+          "palette_name": "High Outpost"
+        }
+      ],
+      "transitions": [
+        {
+          "terrain_type": 35,
+          "endpoint_types": [
+            5,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Ice",
+            "Snow"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 34,
+          "endpoint_types": [
+            2,
+            3
+          ],
+          "endpoint_palette_names": [
+            "Snow",
+            "High Snow"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 22,
+          "endpoint_types": [
+            4,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Moguls",
+            "Snow"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 23,
+          "endpoint_types": [
+            8,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Dirt",
+            "Snow"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 28,
+          "endpoint_types": [
+            15,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Rocky Snow",
+            "Snow"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 29,
+          "endpoint_types": [
+            9,
+            8
+          ],
+          "endpoint_palette_names": [
+            "Water",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 25,
+          "endpoint_types": [
+            11,
+            8
+          ],
+          "endpoint_palette_names": [
+            "Grass",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 32,
+          "endpoint_types": [
+            16,
+            8
+          ],
+          "endpoint_palette_names": [
+            "Outpost",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 24,
+          "endpoint_types": [
+            10,
+            3
+          ],
+          "endpoint_palette_names": [
+            "High Dirt",
+            "High Snow"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 26,
+          "endpoint_types": [
+            12,
+            10
+          ],
+          "endpoint_palette_names": [
+            "High Grass",
+            "High Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 30,
+          "endpoint_types": [
+            13,
+            10
+          ],
+          "endpoint_palette_names": [
+            "High Water",
+            "High Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 33,
+          "endpoint_types": [
+            17,
+            10
+          ],
+          "endpoint_palette_names": [
+            "High Outpost",
+            "High Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        }
+      ]
+    },
+    {
+      "era": 7,
+      "tileset": "twilight",
+      "base_types": [
+        {
+          "terrain_type": 2,
+          "palette_name": "Dirt"
+        },
+        {
+          "terrain_type": 3,
+          "palette_name": "High Dirt"
+        },
+        {
+          "terrain_type": 4,
+          "palette_name": "Mud"
+        },
+        {
+          "terrain_type": 5,
+          "palette_name": "Water"
+        },
+        {
+          "terrain_type": 8,
+          "palette_name": "Crushed Rock"
+        },
+        {
+          "terrain_type": 9,
+          "palette_name": "Sunken Ground"
+        },
+        {
+          "terrain_type": 10,
+          "palette_name": "High Crushed Rock"
+        },
+        {
+          "terrain_type": 11,
+          "palette_name": "Flagstones"
+        },
+        {
+          "terrain_type": 12,
+          "palette_name": "High Flagstones"
+        },
+        {
+          "terrain_type": 13,
+          "palette_name": "High Sunken Ground"
+        },
+        {
+          "terrain_type": 15,
+          "palette_name": "Crevices"
+        },
+        {
+          "terrain_type": 16,
+          "palette_name": "Basilica"
+        },
+        {
+          "terrain_type": 17,
+          "palette_name": "High Basilica"
+        }
+      ],
+      "transitions": [
+        {
+          "terrain_type": 35,
+          "endpoint_types": [
+            5,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Water",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 34,
+          "endpoint_types": [
+            2,
+            3
+          ],
+          "endpoint_palette_names": [
+            "Dirt",
+            "High Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 22,
+          "endpoint_types": [
+            4,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Mud",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 23,
+          "endpoint_types": [
+            8,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Crushed Rock",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 28,
+          "endpoint_types": [
+            15,
+            2
+          ],
+          "endpoint_palette_names": [
+            "Crevices",
+            "Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 29,
+          "endpoint_types": [
+            9,
+            8
+          ],
+          "endpoint_palette_names": [
+            "Sunken Ground",
+            "Crushed Rock"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 25,
+          "endpoint_types": [
+            11,
+            8
+          ],
+          "endpoint_palette_names": [
+            "Flagstones",
+            "Crushed Rock"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 32,
+          "endpoint_types": [
+            16,
+            8
+          ],
+          "endpoint_palette_names": [
+            "Basilica",
+            "Crushed Rock"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 24,
+          "endpoint_types": [
+            10,
+            3
+          ],
+          "endpoint_palette_names": [
+            "High Crushed Rock",
+            "High Dirt"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 26,
+          "endpoint_types": [
+            12,
+            10
+          ],
+          "endpoint_palette_names": [
+            "High Flagstones",
+            "High Crushed Rock"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 30,
+          "endpoint_types": [
+            13,
+            10
+          ],
+          "endpoint_palette_names": [
+            "High Sunken Ground",
+            "High Crushed Rock"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        },
+        {
+          "terrain_type": 33,
+          "endpoint_types": [
+            17,
+            10
+          ],
+          "endpoint_palette_names": [
+            "High Basilica",
+            "High Crushed Rock"
+          ],
+          "status": "upstream_adjacency_endpoints_inferred",
+          "geometry": "unknown_until_group_links_and_vf4_checked"
+        }
+      ]
+    }
+  ]
+}
