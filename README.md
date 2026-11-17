@@ -2,11 +2,11 @@
 
 [English](#english) · [简体中文](#simplified-chinese) · [繁體中文](#traditional-chinese)
 
-> **Alpha — API only.** This API is under active development. Its interfaces and behavior may change, and it may contain bugs. This repository provides the API and native bridge source only; no client or complete application is included. You must provide your own integration and host application.
+> **Alpha — API only.** **Compatible with StarCraft 1.05 only.** This API is under active development. Its interfaces and behavior may change, and it may contain bugs. This repository provides the API and native bridge source only; no client or complete application is included. You must provide your own integration and host application.
 >
-> **Alpha — 仅提供 API。** 本 API 仍处于开发阶段，接口和行为可能变动，也可能存在错误。本仓库仅提供 API 与原生桥接源码，不包含客户端或完整应用；你需要自行完成接口接入并提供宿主应用。
+> **Alpha — 仅提供 API。** **仅适用于 StarCraft 1.05 版本。** 本 API 仍处于开发阶段，接口和行为可能变动，也可能存在错误。本仓库仅提供 API 与原生桥接源码，不包含客户端或完整应用；你需要自行完成接口接入并提供宿主应用。
 >
-> **Alpha — 僅提供 API。** 本 API 仍處於開發階段，介面與行為可能變動，也可能存在錯誤。本儲存庫僅提供 API 與原生橋接原始碼，不包含用戶端或完整應用程式；你需要自行完成介面串接並提供宿主應用程式。
+> **Alpha — 僅提供 API。** **僅適用於 StarCraft 1.05 版本。** 本 API 仍處於開發階段，介面與行為可能變動，也可能存在錯誤。本儲存庫僅提供 API 與原生橋接原始碼，不包含用戶端或完整應用程式；你需要自行完成介面串接並提供宿主應用程式。
 
 <a name="english"></a>
 
