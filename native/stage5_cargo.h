@@ -8,6 +8,9 @@ typedef struct ScapiCargo {
     DWORD slot,visual,type,enabled,unit,unique,node,sort_position;
 } ScapiCargo;
 static ScapiCargo stage5_cargo[8];
+/* Semantic identity of the last committed cargo list, separate from the live
+   rows. UI redraw suppression may hide the list without expiring its ticket. */
+static ScapiCargo stage5_cargo_identity[8];
 static DWORD stage5_cargo_selection,stage5_cargo_epoch;
 
 static DWORD stage5_collect_cargo(ScapiCargo *rows) {
@@ -42,18 +45,35 @@ static DWORD stage5_collect_cargo(ScapiCargo *rows) {
     for(i=0;i<count;++i)rows[i].slot=i;
     return count;
 }
+/* Compare only facts that identify a cargo slot for commands: slot order,
+   passenger incarnation, type and enabled state. The transient UI node
+   pointer, sprite visual frame and raw pixel sort key are deliberately
+   ignored; a changed sort that reorders slots is still captured by slot+unit. */
+static int stage5_cargo_same_identity(const ScapiCargo *a,const ScapiCargo *b) {
+    DWORD i;
+    for(i=0;i<8;++i)
+        if(a[i].slot!=b[i].slot || a[i].unit!=b[i].unit ||
+           a[i].unique!=b[i].unique || a[i].type!=b[i].type ||
+           a[i].enabled!=b[i].enabled)return 0;
+    return 1;
+}
 static void stage5_sample_cargo(void) {
-    ScapiCargo fresh[8];DWORD count,changed,next;
+    ScapiCargo fresh[8];DWORD count,changed,next,suppressed;
+    suppressed=SCAPI_State.active && SCAPI_State.tile_pointer && U8(0x68c9dc);
     memset(fresh,0,sizeof(fresh));count=stage5_collect_cargo(fresh);
     if(!count)memset(fresh,0,sizeof(fresh));
-    changed=memcmp(fresh,stage5_cargo,sizeof(fresh)) ||
-        stage5_cargo_selection!=SCAPI_State.selection_generation || stage5_cargo_epoch!=SCAPI_State.epoch;
-    memcpy(stage5_cargo,fresh,sizeof(fresh));stage5_cargo_selection=SCAPI_State.selection_generation;
-    stage5_cargo_epoch=SCAPI_State.epoch;SCAPI_State.cargo_address=(DWORD)(uintptr_t)stage5_cargo;
-    SCAPI_State.cargo_count=count;
+    changed=stage5_cargo_selection!=SCAPI_State.selection_generation ||
+        stage5_cargo_epoch!=SCAPI_State.epoch;
+    changed=changed || (!suppressed && !stage5_cargo_same_identity(fresh,stage5_cargo_identity));
     if(changed) {
+        memcpy(stage5_cargo_identity,fresh,sizeof(fresh));
+        stage5_cargo_selection=SCAPI_State.selection_generation;
+        stage5_cargo_epoch=SCAPI_State.epoch;
         next=SCAPI_State.cargo_serial+1;if(!next)SCAPI_State.enable_actions=0;
         InterlockedExchange((LONG*)&SCAPI_State.cargo_serial,next);
     }
+    memcpy(stage5_cargo,fresh,sizeof(fresh));
+    SCAPI_State.cargo_address=(DWORD)(uintptr_t)stage5_cargo;
+    SCAPI_State.cargo_count=count;
 }
 #endif

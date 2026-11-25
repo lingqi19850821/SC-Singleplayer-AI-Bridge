@@ -48,6 +48,11 @@ class EventLog:
                 row.update(kind='contact_no_longer_current',contact=e.color)
             elif e.type==5:
                 row.update(kind='enemy_in_view')
+            elif e.type in (14,15,16):
+                # Non-enemy minimap contacts are informational, never threats.
+                relation={14:'allied',15:'rescuable',16:'neutral'}[e.type]
+                row.update(kind='offscreen_non_enemy_contact',relation=relation,contact=e.color)
+                if e.x>=0 and e.y>=0:row['minimap_pixel']={'x':e.x,'y':e.y}
             elif e.type==6:
                 row.update(kind='research_completed')
             elif e.type==7:

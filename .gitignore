@@ -4,6 +4,7 @@
 /profiles/
 /.tools/
 /.codex/
+/.deepseek-agent-tmp/
 /.venv/
 __pycache__/
 *.py[cod]

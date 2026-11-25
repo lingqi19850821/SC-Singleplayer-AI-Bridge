@@ -104,10 +104,17 @@ class SupplyKnowledge:
             # learned facts are sought through their composite primary key.
             placeholders = ','.join('(?,?)' for _ in range(UNIT_TYPE_COUNT))
             parameters = tuple(item for kind, raw in enumerate(current) for item in (kind, raw))
+            if getattr(self.knowledge, '_shared_attached', False):
+                learned_source = (
+                    '(SELECT kind,raw,amount FROM main.learned_supply_v1 '
+                    'UNION SELECT kind,raw,amount FROM shared.learned_supply_v1) AS learned'
+                )
+            else:
+                learned_source = 'learned_supply_v1 AS learned'
             rows = self.knowledge.db.execute(
                 f'WITH current_map(kind,raw) AS (VALUES {placeholders}) '
-                'SELECT learned.kind,learned.raw,learned.amount FROM current_map '
-                'CROSS JOIN learned_supply_v1 AS learned '
+                f'SELECT learned.kind,learned.raw,learned.amount FROM current_map '
+                f'CROSS JOIN {learned_source} '
                 'WHERE learned.kind=current_map.kind AND learned.raw=current_map.raw',
                 parameters).fetchall()
             known = {}
@@ -127,6 +134,10 @@ class SupplyKnowledge:
             self.knowledge.db.execute(
                 'INSERT OR REPLACE INTO learned_supply_v1(kind,raw,amount) VALUES(?,?,?)',
                 (kind, raw, amount))
+            if getattr(self.knowledge, '_shared_attached', False):
+                self.knowledge.db.execute(
+                    'INSERT OR REPLACE INTO shared.learned_supply_v1(kind,raw,amount) VALUES(?,?,?)',
+                    (kind, raw, amount))
             self.knowledge.commit()
         except BaseException:
             self.knowledge.db.rollback()

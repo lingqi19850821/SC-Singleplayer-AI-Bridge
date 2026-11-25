@@ -106,6 +106,7 @@ static DWORD stage4_building_appearance(BYTE *sp,DWORD type,DWORD *damage_count)
 }
 static ScapiViewItem scene_view[1700],view_items[1700];
 static ScapiSceneTrack scene_tracks[1700];
+static DWORD scene_contact_kind[1700];
 static DWORD scene_epoch,scene_count,contact_serial;
 #ifdef SCAPI_STAGE5
 /* Called only after the existing scene qualification and dwell. The public
@@ -122,6 +123,8 @@ static void stage5_view_terrain_source(ScapiViewItem *item,BYTE *u,BYTE *sp) {
 static void stage4_forget(ScapiSceneTrack *track) {
     if(track->contact_state==1 && SCAPI_State.events_enabled)
         stage4_publish(S4_EVENT_STALE,0,0,track->contact_id);
+    if(track>=scene_tracks && track<scene_tracks+1700)
+        scene_contact_kind[track-scene_tracks]=0;
     memset(track,0,sizeof(*track));
 }
 static void stage4_view_reset(void) {
@@ -134,6 +137,7 @@ static void stage4_contacts_restart(void) {
         scapi_attention_reset(&scene_tracks[i].outside);
         scene_tracks[i].contact_id=scene_tracks[i].contact_state=0;
         scene_tracks[i].in_camera=0;
+        scene_contact_kind[i]=0;
     }
 }
 static int stage4_view_anchor(BYTE *u,int *ax,int *ay) {
@@ -166,6 +170,44 @@ static void stage4_contact_hint(BYTE *sp,int *x,int *y) {
     if(!scale || !SCAPI_State.minimap_width || !SCAPI_State.minimap_height)return;
     *x=SCAPI_State.minimap_left+*(short*)(sp+20)/(int)scale;
     *y=SCAPI_State.minimap_top+*(short*)(sp+22)/(int)scale;
+}
+/* Target1.05 DrawMinimapUnits 0x46B0E0 filters: Subunit, traps/doors, Dark
+   Swarm and Disruption Web never become live minimap contacts. Loaded units,
+   spells, resources and critters are likewise not map contacts. Foreign
+   entities additionally need one footprint tile in current vision; explored
+   fog alone cannot keep a contact alive. Fixtures with no readable tile array
+   retain the existing sprite/detection evidence only. */
+static int stage4_minimap_contact_eligible(BYTE *u,BYTE *sp,DWORD type,DWORD owner,
+                                           DWORD local,DWORD mask) {
+    DWORD width,height,count,status=*(DWORD*)(u+0xdc),*tiles;
+    short *edges;
+    int x,y,l,t,r,b,xx,yy;
+    if(owner==local || owner>=12 || type>=228)return 0;
+    if((U32(0x6b0358+type*4u)&0x10u) ||
+       (type>=0xcbu && type<=0xd5u) || type==0xcau || type==0x69u)return 0;
+    if((status&0x40u) || type==33u || type==101u || type==214u)return 0;
+    if((type>=176u && type<=178u) || type==188u)return 0;
+    if(type==89u || type==90u || (type>=93u && type<=96u))return 0;
+    width=SCAPI_State.width_tiles;height=SCAPI_State.height_tiles;
+    if(!width || !height || width>256 || height>256)return 1;
+    count=width*height;
+    tiles=(DWORD*)(uintptr_t)SCAPI_State.tile_pointer;
+    if(!readable(tiles,count*4u))return 1;
+    x=*(short*)(sp+20);y=*(short*)(sp+22);
+    if(x<0 || y<0 || (DWORD)x>=width*32u || (DWORD)y>=height*32u)return 0;
+    edges=(short*)(AT(0x6af898)+type*8u);
+    if(readable(edges,8)) {
+        l=x-edges[0];t=y-edges[1];r=x+edges[2];b=y+edges[3];
+    } else {l=r=x;t=b=y;}
+    if(l<0)l=0;if(t<0)t=0;
+    if(r>=(int)(width*32u))r=(int)(width*32u)-1;
+    if(b>=(int)(height*32u))b=(int)(height*32u)-1;
+    if(l>r || t>b)return 0;
+    for(yy=t/32;yy<=b/32;++yy)for(xx=l/32;xx<=r/32;++xx) {
+        DWORD bit=(DWORD)yy*width+(DWORD)xx;
+        if(!(tiles[bit]&mask))return 1;
+    }
+    return 0; /* all footprint tiles are explored fog, not current vision */
 }
 static void stage4_view_sample(void) {
     DWORD i,now=real_tick(),start=now,local=U32(0x4f30c0),mask=U32(0x65098c);
@@ -218,12 +260,21 @@ static void stage4_view_sample(void) {
         rel=owner==local?1:owner>=8?4:(U8(0x50d39c+12*local+owner)?2:3);
         inside=operable_part(u);
         if(inside)anchor=stage4_view_anchor(u,&x,&y);
-        if(SCAPI_State.events_enabled && rel==3) {
+        if(SCAPI_State.events_enabled &&
+           stage4_minimap_contact_eligible(u,sp,type,owner,local,mask)) {
+            DWORD kind=rel==3?S4_EVENT_CONTACT:
+                stage4_rescuable_owner(owner)?S5_EVENT_RESCUABLE_CONTACT:
+                rel==2?S5_EVENT_ALLIED_CONTACT:S5_EVENT_NEUTRAL_CONTACT;
+            if(track->contact_state==1 && scene_contact_kind[i]!=kind) {
+                stage4_publish(S4_EVENT_STALE,0,0,track->contact_id);
+                track->contact_state=0;scene_contact_kind[i]=0;
+                scapi_attention_reset(&track->outside);
+            }
             if(inside) {
                 scapi_attention_reset(&track->outside);
                 if(track->contact_state==1)stage4_publish(S4_EVENT_STALE,0,0,track->contact_id);
-                track->contact_state=0;
-                if(!track->in_camera && anchor)stage4_publish(S4_EVENT_IN_VIEW,0,0,0);
+                track->contact_state=0;scene_contact_kind[i]=0;
+                if(rel==3 && !track->in_camera && anchor)stage4_publish(S4_EVENT_IN_VIEW,0,0,0);
             } else {
                 elapsed=scapi_attention_elapsed(&track->outside,now,1);
                 if(!track->contact_state && SCAPI_State.contact_wait_ms &&
@@ -232,11 +283,19 @@ static void stage4_view_sample(void) {
                     if(contact_serial==0xffffffffu)track->contact_state=2;
                     else {
                         track->contact_id=++contact_serial;
-                        track->contact_state=stage4_publish(S4_EVENT_CONTACT,hx,hy,track->contact_id)==0?1:2;
+                        track->contact_state=stage4_publish(kind,hx,hy,track->contact_id)==0?1:2;
+                        if(track->contact_state==1)scene_contact_kind[i]=kind;
                     }
                 }
             }
-        } else scapi_attention_reset(&track->outside);
+        } else {
+            /* Loading, fog or a DrawMinimapUnits exclusion ends the current
+               contact; a later eligible episode must earn the full wait. */
+            if(track->contact_state==1 && SCAPI_State.events_enabled)
+                stage4_publish(S4_EVENT_STALE,0,0,track->contact_id);
+            track->contact_state=0;scene_contact_kind[i]=0;
+            scapi_attention_reset(&track->outside);
+        }
         track->in_camera=inside && anchor;
         elapsed=scapi_attention_elapsed(&track->screen,now,inside && anchor);
         if(configured && track->screen.active && elapsed>=SCAPI_State.view_wait_ms) {

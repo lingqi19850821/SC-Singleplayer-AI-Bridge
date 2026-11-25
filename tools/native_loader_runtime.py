@@ -15,6 +15,12 @@ from tools.native_episode_artifacts import approved_episode_loader
 
 ROOT = Path(__file__).resolve().parents[1]
 APPROVED_LOADERS = (
+    ROOT / 'build/stage5/stage5_loader_v53_stability.exe',
+    ROOT / 'build/stage5/stage5_loader_v53_next_episode.exe',
+    ROOT / 'build/stage5/stage5_loader_v52_cargo_stationary.exe',
+    ROOT / 'build/stage5/stage5_loader_v52_next_episode.exe',
+    ROOT / 'build/stage5/stage5_loader_v51_perception_fixes.exe',
+    ROOT / 'build/stage5/stage5_loader_v51_next_episode.exe',
     ROOT / 'build/stage5/stage5_loader_v49_minimap_ping.exe',
     ROOT / 'build/stage5/stage5_loader_v49_next_episode.exe',
 )

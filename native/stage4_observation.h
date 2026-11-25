@@ -2,9 +2,9 @@
    static evidence; actual UI values and geometry require separate validation.
    This file runs only at the existing UI-thread mailbox site. */
 static DWORD detail_epoch,detail_selection;
-static LONG detail_camera_x,detail_camera_y;
 static DWORD detail_values[14];
 static int panel_visible(BYTE *u);
+static int panel_hud_visible(BYTE *u);
 static void panel_detail_stamp(BYTE *u,DWORD *stamp);
 
 /* Target 1.05's 0x424660 tests this exact per-player byte for 3 or 4.
@@ -23,12 +23,10 @@ static void stage4_interrupt(void) {
 static void stage4_attention(BYTE *u,DWORD *values,DWORD now) {
     if(!SCAPI_State.details_active || detail_epoch!=SCAPI_State.epoch ||
        detail_selection!=SCAPI_State.selection_generation ||
-       detail_camera_x!=SCAPI_State.camera_x || detail_camera_y!=SCAPI_State.camera_y ||
        memcmp(values,detail_values,sizeof(detail_values))) {
         memcpy(detail_values,values,sizeof(detail_values));
         SCAPI_State.details_started_tick=now;SCAPI_State.details_active=1;SCAPI_State.details_ready=0;
         detail_epoch=SCAPI_State.epoch;detail_selection=SCAPI_State.selection_generation;
-        detail_camera_x=SCAPI_State.camera_x;detail_camera_y=SCAPI_State.camera_y;
     }
     if((DWORD)(now-SCAPI_State.details_started_tick)>=SCAPI_State.details_wait_ms)
         SCAPI_State.details_ready=1;
@@ -44,12 +42,12 @@ static void stage4_sample(void) {
         SCAPI_State.minimap_scale=U16(0x650868);
     }
     if(SCAPI_State.details_active &&
-       (detail_epoch!=SCAPI_State.epoch || detail_selection!=SCAPI_State.selection_generation ||
-        detail_camera_x!=SCAPI_State.camera_x || detail_camera_y!=SCAPI_State.camera_y))stage4_interrupt();
+       (detail_epoch!=SCAPI_State.epoch || detail_selection!=SCAPI_State.selection_generation))
+        stage4_interrupt();
     u=((BYTE**)AT(0x684940))[0];
     if(SCAPI_State.pause || !SCAPI_State.active || SCAPI_State.selection_count!=1 ||
        !SCAPI_State.details_wait_ms || SCAPI_State.details_wait_ms>=0x80000000u ||
-       !valid_unit(u) || *(WORD*)(u+0x64)>=228 || u[0x4c]>=12 || !panel_visible(u))stage4_interrupt();
+       !valid_unit(u) || *(WORD*)(u+0x64)>=228 || u[0x4c]>=12 || !panel_hud_visible(u))stage4_interrupt();
     else {
         panel_detail_stamp(u,values);stage4_attention(u,values,now);
 #ifdef SCAPI_STAGE5
@@ -84,6 +82,13 @@ static int panel_visible(BYTE *u) {
     DWORD mask=U32(0x65098c),status=*(DWORD*)(u+0xdc);
     if(!(sprite[12]&mask) || ((status&0x300) && !(*(DWORD*)(u+0xe4)&mask))) return 0;
     return operable_part(u);
+}
+/* HUD presence without the camera viewport requirement: the selected unit may
+   keep its detail dwell and learned card while the camera looks elsewhere. */
+static int panel_hud_visible(BYTE *u) {
+    BYTE *sprite=*(BYTE**)(u+12);
+    DWORD mask=U32(0x65098c),status=*(DWORD*)(u+0xdc);
+    return (sprite[12]&mask) && !((status&0x300) && !(*(DWORD*)(u+0xe4)&mask));
 }
 static int panel_health_visible(BYTE *u) {
     DWORD type=*(WORD*)(u+0x64),maximum=U32(0x6abd38+type*4)/256u;
@@ -157,6 +162,9 @@ static void panel_detail_stamp(BYTE *u,DWORD *stamp) {
         for(n=0;n<228;++n)hash=hash*33u+U8(0x4fefe4+228u*u[0x4c]+n);
     }
 #endif
+    /* An unfinished zero-button building changes no command card on
+       completion, so fold its lifecycle bit into the dwell stamp. */
+    hash=hash*33u+(((U32(0x6b0358+type*4u)&1u) && !(*(DWORD*)(u+0xdc)&1u))?1u:0u);
     stamp[13]=hash;
 }
 static void stage4_fill_panel(BYTE *u,DWORD *values,ScapiState *out) {
@@ -205,7 +213,7 @@ static DWORD stage4_observe(int learn) {
     if(SCAPI_State.expected_selection!=SCAPI_State.selection_generation)return SC_STALE_SELECTION;
     if(SCAPI_State.selection_count!=1){stage4_interrupt();return SC_NO_SELECTION;}
     u=((BYTE**)AT(0x684940))[0];
-    if(!valid_unit(u) || !panel_visible(u)){stage4_interrupt();return SC_NO_SELECTABLE_UNIT;}
+    if(!valid_unit(u) || !panel_hud_visible(u)){stage4_interrupt();return SC_NO_SELECTABLE_UNIT;}
     if(*(WORD*)(u+0x64)>=228 || u[0x4c]>=12)return SC_UNINITIALIZED;
     if(!SCAPI_State.details_wait_ms || SCAPI_State.details_wait_ms>=0x80000000u)return SC_BAD_ARGUMENT;
     panel_detail_stamp(u,values);stage4_attention(u,values,now);

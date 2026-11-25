@@ -18,8 +18,16 @@ from .visible_status import visible_panel_status
 # Private protocol type, independent of the map's displayed unit name.
 LARVA_TYPE=35
 
+def _needs_learning(knowledge,kind,*,owned,has_health=True,incomplete_building=False):
+    predicate=getattr(knowledge,'needs_learning',None)
+    if not callable(predicate):
+        return False
+    return bool(predicate(kind,owned=owned,has_health=has_health,
+                          incomplete_building=incomplete_building))
+
 def selected_panel_result(reply,knowledge=None,card=None,profiles=None,weapon_names=None,
-                          weapon_evidence=None,reused_weapons=None,commit=True):
+                          weapon_evidence=None,reused_weapons=None,commit=True,
+                          incomplete_building=False,status_text=None):
     if reply['result']!='ok':return action_result(reply)
     s=reply['developer_after']
     if not s['panel_available']:return {'status':'unavailable'}
@@ -29,6 +37,13 @@ def selected_panel_result(reply,knowledge=None,card=None,profiles=None,weapon_na
     panel={'type_token':knowledge.token('type',kind),'owner_token':knowledge.token('owner',owner),
            'owned':bool(s['panel_owned']),
            'armor_upgrade':s['panel_armor_level']}
+    # The native UI already resolved localization and precedence. Only the
+    # exact observed English label proves this static unit property.
+    if status_text=='Detector':
+        mark_detector=getattr(knowledge,'mark_detector',None)
+        if callable(mark_detector):mark_detector(kind,commit=False)
+    detector=getattr(knowledge,'detector',None)
+    if callable(detector) and detector(kind) is True:panel['detector']=True
     if s['panel_rescuable']:panel['rescuable']=True
     if s['panel_has_health']:panel['hp']={'current':s['panel_hp'],'maximum':s['panel_max_hp']}
     for channel in ('ground','air'):
@@ -39,7 +54,11 @@ def selected_panel_result(reply,knowledge=None,card=None,profiles=None,weapon_na
         knowledge.observe_grade(owner,15,s['panel_shield_level'])
     if s['panel_owned'] and s['panel_has_energy']:
         panel['energy']={'current':s['panel_energy'],'maximum':s['panel_max_energy']}
-    details={};complete=bool(s['panel_has_health'])
+    details={};complete=True
+    if not s['panel_has_health']:
+        stats_known=getattr(knowledge,'is_stats_known',None)
+        complete=(bool(s['details_ready']) or
+                  (bool(stats_known(kind)) if callable(stats_known) else False))
     channels={'armor':{'base':s['panel_armor_base'],'bonus':s['panel_armor_bonus'],
                        'upgrade':s['panel_armor_level']}} if s['panel_has_health'] else {}
     for channel in ('ground','air'):
@@ -75,13 +94,32 @@ def selected_panel_result(reply,knowledge=None,card=None,profiles=None,weapon_na
             if weapon_names is not None and known is None:complete=False
     if weapons:panel['weapons']=weapons
     if s['panel_owned']:
-        if card is None:complete=False
+        if incomplete_building:
+            # An unfinished building exposes only transitional buttons (for
+            # example Cancel); reuse already-known labels but never learn them
+            # and never claim its owned card as complete.
+            if card is not None:
+                panel['basic_commands']=card['basic_commands']
+                skills,_=knowledge.skills(kind,card['skills'],learn=False)
+                if skills:panel['skills']=skills
+            complete=False
+        elif card is None:complete=False
         else:
             panel['basic_commands']=card['basic_commands']
             skills,matched=knowledge.skills(kind,card['skills'],learn=bool(s['details_ready']))
             if skills:panel['skills']=skills
             complete=complete and matched
-    if complete:panel['fully_known']=True
+    if complete:
+        panel['fully_known']=True
+        if not temporary:
+            mark_stats=getattr(knowledge,'mark_stats_known',None)
+            if callable(mark_stats):mark_stats(kind)
+            if s['panel_owned'] and not incomplete_building:
+                mark_owned=getattr(knowledge,'mark_owned_known',None)
+                if callable(mark_owned):mark_owned(kind)
+                else:
+                    legacy=getattr(knowledge,'mark_fully_known',None)
+                    if callable(legacy):legacy(kind)
     if commit:knowledge.commit()
     if temporary:knowledge.close()
     return {'status':'observed','panel':panel}
@@ -114,11 +152,16 @@ class Stage4(Actions):
                 'control':mode,'paused':bool(s['pause']),
                 'actions_allowed':bool(mode=='player' and s['enable_actions']==1 and s['hook_installed']==1)}
 
-    def __init__(self,pid,*,knowledge_path=None):
+    def __init__(self,pid,*,knowledge_path=None,shared_knowledge_path=None,knowledge_mode='official_standard'):
         super().__init__(pid)
         try:
             path=knowledge_path or Path(__file__).resolve().parents[1]/'build/stage4/panel-knowledge.sqlite3'
-            self._knowledge=PanelKnowledge(f'{self._pid}:{self._creation}:{self._client.address}:{self._epoch}',path)
+            self._knowledge=PanelKnowledge(
+                f'{self._pid}:{self._creation}:{self._client.address}:{self._epoch}',
+                path,
+                shared_path=shared_knowledge_path,
+                knowledge_mode=knowledge_mode,
+            )
             self._rules=PanelRules(self._client.reader,self._client.peek()['game_base'])
             self._weapons=WeaponNames(self._client.reader,self._client.peek()['game_base'])
         except BaseException:
@@ -223,7 +266,7 @@ class Stage4(Actions):
             return {'status':'rejected','reason':'observation_changed_during_read'}
         self._sync_own_grades(own_grades)
         for kind,name in reused_names.items():self._knowledge.remember_name(kind,name)
-        units=[]
+        units=[];learning_needed={}
         for index,(fields,profiles,shielded,visual_bits) in enumerate(classified):
             visual,x,y,relation,hp,shields,energy,flags,kind,owner,ground,air,armor,gweapon,aweapon,health,extra=fields[:17]
             item={'appearance_token':f'sprite:{visual}',
@@ -261,6 +304,13 @@ class Stage4(Actions):
             groups={'ground_attack':ground,'air_attack':air,'armor':armor}
             if health and shielded:groups['shields']=15
             item.update(self._knowledge.project(kind,owner,groups,profiles,reused))
+            is_incomplete=bool(visual_bits&(16|32));owned=(relation==1);has_hp=bool(health)
+            learning_key=(kind,owned,has_hp,is_incomplete)
+            if learning_key not in learning_needed:
+                learning_needed[learning_key]=_needs_learning(
+                    self._knowledge,kind,owned=owned,has_health=has_hp,
+                    incomplete_building=is_incomplete)
+            if learning_needed[learning_key]:item['unlearned']=True
             amount=supply.value(kind,supply_snapshot) if supply is not None else None
             if amount is not None and amount>0:item['supply_provided']=amount
             # Precise current values belong to actual selection observations.
@@ -344,6 +394,11 @@ class Stage4(Actions):
                         'details_started_tick','details_active','panel_available','panel_type','panel_owner',
                         'panel_has_health','panel_ground_weapon','panel_air_weapon')) or not confirmed['details_ready']):
                 return {'status':'rejected','reason':'observation_changed_during_read'}
+            # Status text (notably Detector) must come from the same final
+            # confirmed native sample used for learning, never an earlier UI
+            # snapshot that may have been superseded by the confirmation read.
+            status_text=visible_panel_status(self._client.reader,confirmed,
+                PanelText(self._client.reader,text_budget_bytes,encoding))
             expected_serial=confirmed['completed_serial']
         current=self._client.peek()
         same_own_grades=True
@@ -377,7 +432,8 @@ class Stage4(Actions):
             self._sync_own_grades(own_grades)
             self._knowledge.observe_armor_extra(s['panel_type'],s['panel_owner'],extra)
             result=selected_panel_result(r,self._knowledge,card,profiles,
-                weapon_names if weapon_reader is not None else None,weapon_evidence,reused,commit=False)
+                weapon_names if weapon_reader is not None else None,weapon_evidence,reused,commit=False,
+                status_text=status_text)
             if name is not None:
                 self._knowledge.remember_name(s['panel_type'],name)
                 result['panel']['name']=name

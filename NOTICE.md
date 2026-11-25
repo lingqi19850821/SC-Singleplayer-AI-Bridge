@@ -1,6 +1,6 @@
 # License and source notices
 
-The project-authored API code and integration documentation are distributed under GNU AGPL version 3 only; see [LICENSE](LICENSE). The existing repository license is preserved. Source extraction and the portability edits below were made on 2026-11-16.
+The project-authored API code and integration documentation are distributed under GNU AGPL version 3 only; see [LICENSE](LICENSE). The existing repository license is preserved. Source extraction and the portability edits below were made on 2026-11-16; updated 2026-11-25 to the v53 / ABI 27 native candidate set.
 
 ## BWAPI
 
@@ -21,6 +21,6 @@ BWAPI 4.4.0 is a technical reference for the bridge. The terrain implementation 
 
 ## Standalone extraction changes
 
-The API implementations and native protocol were retained. The package entry point now exposes Stage5; startup context points to the local interface reference. The Windows transport primitives were separated from the research-only probing CLI, and the base transport uses a package import. Native cleanup paths are resolved from this checkout. Episode builds accept an explicit compiler or `SCAPI_TCC`. The native loader requires an exact compiled DLL path and retains its game whitelist, identity checks and unknown-result behavior. `tools/build_native.py` builds the existing v49 or optional v50 candidate without running it.
+The API implementations and native protocol were retained. The package entry point now exposes Stage5; startup context points to the local interface reference. The Windows transport primitives were separated from the research-only probing CLI, and the base transport uses a package import. Native cleanup paths are resolved from this checkout. Episode builds accept an explicit compiler or `SCAPI_TCC`. The native loader requires an exact compiled DLL path and retains its game whitelist, identity checks and unknown-result behavior. `tools/build_native.py` builds the v53 / ABI 27 stability and next-episode candidate set, or the optional v50 diagnostic, without running either artifact.
 
 Desktop/voice modules, model providers, role orchestration, development reports, private runtime data and tests were excluded. Compiler and runtime licensing remains the responsibility of distributors who choose to bundle those separate products; this source repository does not bundle them.

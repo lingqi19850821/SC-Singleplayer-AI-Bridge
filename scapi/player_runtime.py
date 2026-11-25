@@ -8,13 +8,14 @@ from datetime import datetime, timezone
 import json
 import re
 import secrets
+import sqlite3
 import time
 import traceback
 
 from .actions import SelectionTicket
 from .stage5 import ButtonTicket, TargetTicket, ProductionTicket, CargoTicket
 from .tips import TipsRuntime
-from .experience import ExperienceStore
+from .experience import AUTHOR_ROLES, ExperienceStore
 from .automatic_information import INFORMATION_OPS
 from .wire_identity import normalize_identity
 
@@ -96,7 +97,9 @@ class ReadyRuntime:
         'experience_record', 'experience_revise', 'experience_refute'}
 
     def __init__(self, api, events, log, *, profile_id, lifecycle, run_ref, capabilities=(),
-                 tutorial_depot_limit=None, tutorial_new_depot_intents=None, diagnostics='full'):
+                 tutorial_depot_limit=None, tutorial_new_depot_intents=None, diagnostics='full',
+                 role_experience_paths=None, shared_experience_paths=None,
+                 shared_experience_profile='official_standard'):
         if diagnostics not in ('full', 'minimal'):
             raise ValueError('diagnostics must be full or minimal')
         self.diagnostics = diagnostics
@@ -126,7 +129,169 @@ class ReadyRuntime:
         self._startup_offered = set()
         self._store_id = None
         self._delivery_sequence = 0
-        self._attach(api, events, run_ref, initial=True)
+        self.shared_experience_profile = shared_experience_profile
+        self.role_experiences = {}
+        self._closed_role_experiences = set()
+        try:
+            self._init_role_experiences(role_experience_paths, shared_experience_paths)
+            self._attach(api, events, run_ref, initial=True)
+        except BaseException:
+            self._close_role_experiences()
+            raise
+
+    def _init_role_experiences(self, role_experience_paths, shared_experience_paths):
+        """Each role owns independent episode and persistent SQLite notebooks."""
+        if role_experience_paths is None:
+            return
+        if not isinstance(role_experience_paths, dict):
+            raise ValueError('role experience paths must be a role-keyed mapping')
+        shared_paths = {} if shared_experience_paths is None else shared_experience_paths
+        if not isinstance(shared_paths, dict):
+            raise ValueError('shared experience paths must be a role-keyed mapping')
+        for role, episode_path in role_experience_paths.items():
+            if not isinstance(role, str) or role not in AUTHOR_ROLES:
+                raise ValueError('invalid_experience_author_role')
+            self.role_experiences[role] = ExperienceStore(
+                episode_path, profile_id=self.profile_id,
+                shared_store=shared_paths.get(role),
+                shared_profile_id=self.shared_experience_profile)
+
+    def _close_role_experiences(self):
+        failures = []
+        experiences = getattr(self, 'role_experiences', {}) or {}
+        closed = getattr(self, '_closed_role_experiences', None)
+        if closed is None:
+            closed = self._closed_role_experiences = set()
+        for role, store in list(experiences.items()):
+            if role in closed:
+                continue
+            try:
+                for db in (getattr(store, 'db', None),
+                           getattr(store, 'shared_db', None)):
+                    if not isinstance(db, sqlite3.Connection):
+                        continue
+                    try:
+                        if db.in_transaction:
+                            db.commit()
+                    except sqlite3.ProgrammingError:
+                        pass
+                    except BaseException:
+                        failures.append(traceback.format_exc())
+                    try:
+                        db.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+                    except (sqlite3.ProgrammingError, sqlite3.OperationalError):
+                        pass
+                    except BaseException:
+                        failures.append(traceback.format_exc())
+            finally:
+                try:
+                    store.close()
+                except BaseException:
+                    failures.append(traceback.format_exc())
+                else:
+                    closed.add(role)
+        return failures
+
+    def _persistent_databases(self):
+        """Every owned/borrowed SQLite handle this runtime must flush on exit."""
+        values = []
+        api = getattr(self, 'api', None)
+        if api is not None:
+            knowledge = getattr(api, '_knowledge', None)
+            if knowledge is not None:
+                values.append(getattr(knowledge, 'db', None))
+            bookmarks = getattr(api, '_bookmarks', None)
+            if bookmarks is not None:
+                values.append(getattr(bookmarks, 'db', None))
+        experience = getattr(self, 'experience', None)
+        if experience is not None:
+            values.append(getattr(experience, 'db', None))
+        closed = getattr(self, '_closed_role_experiences', set())
+        for role, store in (getattr(self, 'role_experiences', {}) or {}).items():
+            if role in closed:
+                continue
+            values.append(getattr(store, 'db', None))
+            values.append(getattr(store, 'shared_db', None))
+        answer = []
+        seen = set()
+        for db in values:
+            if isinstance(db, sqlite3.Connection) and id(db) not in seen:
+                seen.add(id(db))
+                answer.append(db)
+        return answer
+
+    def _commit_persistence(self):
+        """Commit and checkpoint before any handle is closed.
+
+        Closing a SQLite connection with an open transaction rolls it back; a
+        clean worker exit must flush WAL state so the parent can snapshot it.
+        """
+        failures = []
+        for db in self._persistent_databases():
+            try:
+                if db.in_transaction:
+                    db.commit()
+            except sqlite3.ProgrammingError:
+                continue
+            except BaseException:
+                failures.append(traceback.format_exc())
+                continue
+            try:
+                db.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+            except (sqlite3.ProgrammingError, sqlite3.OperationalError):
+                pass
+            except BaseException:
+                failures.append(traceback.format_exc())
+        return failures
+
+    def _close_api_persistence_handles(self, api):
+        """Best-effort second close of every SQLite-backed API handle."""
+        failures = []
+        bookmarks = getattr(api, '_bookmarks', None)
+        if bookmarks is not None:
+            try:
+                close = getattr(bookmarks, 'close', None)
+                if callable(close):
+                    close()
+            except BaseException:
+                failures.append(traceback.format_exc())
+        building = getattr(api, '_building_memory', None)
+        if building is not None:
+            try:
+                source = getattr(api, '_building_source', None)
+                stop = getattr(source, 'stop', None)
+                if callable(stop):
+                    stop()
+                close = getattr(building, 'close', None)
+                if callable(close):
+                    close()
+            except BaseException:
+                failures.append(traceback.format_exc())
+        knowledge = getattr(api, '_knowledge', None)
+        if knowledge is not None:
+            try:
+                close = getattr(knowledge, 'close', None)
+                if callable(close):
+                    close()
+                else:
+                    db = getattr(knowledge, 'db', None)
+                    if isinstance(db, sqlite3.Connection):
+                        db.close()
+            except BaseException:
+                failures.append(traceback.format_exc())
+        return failures
+
+    def experience_for(self, role):
+        """Role notebook when configured; the legacy shared store otherwise."""
+        experiences = getattr(self, 'role_experiences', {}) or {}
+        return (experiences[role] if role in experiences
+                else getattr(self, 'experience', None))
+
+    @property
+    def shared_experience_active(self):
+        experiences = getattr(self, 'role_experiences', {}) or {}
+        return any(getattr(store, 'shared_db', None) is not None
+                   for store in experiences.values())
 
     def _attach(self, api, events, run_ref, *, initial):
         if api is None or events is None:
@@ -222,9 +387,9 @@ class ReadyRuntime:
     def suspend(self):
         """Disarm, close event reader and Stage5 workers; parent stops collector."""
         api, events = self.api, self.events
+        failures = self._commit_persistence()
         self.api = self.events = self.tips = self.experience = None
         self.buttons.clear()
-        failures = []
         if api is not None:
             try:
                 api._client.arm(False)
@@ -244,6 +409,27 @@ class ReadyRuntime:
         if failures:
             self.failed = True
             raise RuntimeError('runtime quiescence failed; consult private log')
+
+    def close(self):
+        """Commit/close owned persistence in addition to normal runtime cleanup."""
+        api = getattr(self, 'api', None)
+        failures = self._commit_persistence()
+        failures.extend(self._close_role_experiences())
+        if api is not None or getattr(self, 'events', None) is not None:
+            try:
+                self.suspend()
+            except BaseException:
+                failures.append(traceback.format_exc())
+        elif getattr(self, 'experience', None) is not None:
+            self.experience = None
+        if api is not None:
+            # Stage5.close normally closes these. Retain an explicit best-effort
+            # close so a partially failed suspend cannot leak panel/building/
+            # bookmark SQLite handles past worker exit.
+            failures.extend(self._close_api_persistence_handles(api))
+        if failures:
+            self.failed = True
+            raise RuntimeError('runtime close failed; consult private log')
 
     @staticmethod
     def _noargs(args):

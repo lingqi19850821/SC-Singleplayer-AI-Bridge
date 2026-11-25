@@ -1,6 +1,6 @@
 """Restricted StarCraft single-player API. Importing does not attach to a game.
 
-Original implementation copied for standalone distribution on 2026-11-16.
+Original implementation copied for standalone distribution on 2026-11-25.
 Stage5 is the current entry point; Actions remains the legacy base interface.
 """
 from .actions import Actions, SelectionTicket

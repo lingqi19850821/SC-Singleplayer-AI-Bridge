@@ -14,8 +14,11 @@ typedef struct ScapiOwnOverviewItem {
     DWORD research_name,upgrade_name;
     DWORD command_identity; /* private finite native encoding, never public */
 } ScapiOwnOverviewItem;
-enum { S5_OWN_BUILDING=1,S5_OWN_POSITION=2,S5_OWN_CARRIER_POSITION=4 };
-static ScapiOwnOverviewItem stage5_own_items[1700];
+/* Fixed 68-byte own-unit row (same layout as ScapiOwnOverviewItem). */
+typedef ScapiOwnOverviewItem ScapiOwnUnit;
+enum { S5_OWN_BUILDING=1,S5_OWN_POSITION=2,S5_OWN_CARRIER_POSITION=4,
+       S5_OWN_INCOMPLETE=8,S5_OWN_HIDDEN_HEALTH=16,S5_OWN_LOADED=32 };
+static ScapiOwnUnit stage5_own_items[1700];
 
 /* The active-work icon tooltip at 4A3D0E..4A3D76 reads exactly the active
    tech/upgrade's loaded name: tech label 69F658, upgrade label 6B0B28.
@@ -100,9 +103,18 @@ static DWORD stage5_own_overview(void) {
         if(!stage5_own_entity(u,local))continue;
         item=&stage5_own_items[count++];memset(item,0,sizeof(*item));
         type=*(WORD*)(u+0x64);status=*(DWORD*)(u+0xdc);
+        /* Loaded in a transport/bunker (0x40) or in a hangar (0x20), whether
+           or not the special parent chain currently resolves the carrier. */
+        if((status&0x40u) || (status&0x20u))item->flags|=S5_OWN_LOADED;
         item->identity=stage5_entity_observe(u,1);item->type=type;
         item->command_identity=stage5_own_identity(u);
-        if(U32(0x6b0358+type*4u)&1u)item->flags|=S5_OWN_BUILDING;
+        if(U32(0x6b0358+type*4u)&1u) {
+            item->flags|=S5_OWN_BUILDING;
+            /* Native completed bit0 is the only construction-finished fact. */
+            if(!(status&1u))item->flags|=S5_OWN_INCOMPLETE;
+        }
+        /* Missing current health readout is metadata, not an invented value. */
+        if(!panel_health_visible(u))item->flags|=S5_OWN_HIDDEN_HEALTH;
         item->name_address=(DWORD)(uintptr_t)((UnitNameFn)AT(0x425390))(type);
         if(item->flags&S5_OWN_BUILDING)stage5_own_work(u,item);
         if(status&0x40u) {

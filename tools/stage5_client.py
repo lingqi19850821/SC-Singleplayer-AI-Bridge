@@ -13,7 +13,7 @@ class State(BaseState):
     _fields_=[(name,C.c_uint32) for name in EXTRA_FIELDS]
 
 class Client(BaseClient):
-    dll_path=Path(__file__).resolve().parents[1]/'build/stage5/scapi_stage5_v49_minimap_ping.dll'
+    dll_path=Path(__file__).resolve().parents[1]/'build/stage5/scapi_stage5_v53_stability.dll'
     state_type=State
     fields=S3_FIELDS+S4_EXTRA+EXTRA_FIELDS
     protocol_version=27

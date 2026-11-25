@@ -9,7 +9,7 @@ from pathlib import Path
 import struct
 import time
 from .actions import SelectionTicket,action_result
-from .stage4 import Stage4,LARVA_TYPE
+from .stage4 import Stage4,LARVA_TYPE,_needs_learning
 from .panel_card import PanelText,TextBudgetRequired,BASIC_ACTIONS
 from tools.stage5_client import Client,State
 from .view_bookmarks import BookmarkStore,validate_save
@@ -61,6 +61,17 @@ class CargoTicket:
 BUTTON_BYTES=32
 PHASES={0:'ready',2:'targeting',3:'placing',4:'enqueued'}
 SKILL_CALLBACKS={0x47a9f0,0x47acf0,0x47aff0,0x47b000,0x47b0a0,0x47b0b0}
+# Native build placement callbacks (stage5_auto_panel.h build domain). Their
+# presence on the live card is the open build submenu; the 4A17F0 opener alone
+# is an ordinary worker command and never a build-site preview.
+BUILD_PLACEMENT_HANDLERS=frozenset((0x47ad80,0x47adc0))
+# Own-overview native flags. These stay private: public rows never expose them.
+S5_OWN_BUILDING=1
+S5_OWN_POSITION=2
+S5_OWN_CARRIER_POSITION=4
+S5_OWN_INCOMPLETE=8
+S5_OWN_HIDDEN_HEALTH=16
+S5_OWN_LOADED=32
 
 def _selection(ticket):
     return SelectionTicket(**{key:getattr(ticket,key) for key in SelectionTicket.__dataclass_fields__})
@@ -269,13 +280,17 @@ class Stage5(Stage4):
         supply=getattr(self,'_supply',None)
         supply_snapshot=supply.snapshot() if supply is not None else None
         names={};labels={};rows=[];by_identity={};by_command_identity={};types_by_command_identity={};seen=set();required=0
+        eligibility={}
+        learning_needed={}
         def label(address):
             if address not in labels:labels[address]=text.string(address)
             return labels[address]
         try:
             for record in struct.iter_unpack('<IIii13I' if lifetime_schema else '<IIii12I' if work_schema else '<IIiiIII',raw):
                 identity,kind,x,y,flags,address,carrier=record[:7]
-                if not identity or identity in seen or kind>=228 or flags&~7 or not address:
+                if not identity or identity in seen or kind>=228 or flags&~63 or not address:
+                    raise RuntimeError('invalid own entity record')
+                if (flags&S5_OWN_INCOMPLETE) and not (flags&1):
                     raise RuntimeError('invalid own entity record')
                 if lifetime_schema and identity>0x07ffffff:raise RuntimeError('invalid own observation identity')
                 seen.add(identity)
@@ -286,7 +301,13 @@ class Stage5(Stage4):
                 # The lawful observation serial is shared with visible rows;
                 # the finite native command identity remains private below.
                 row={'entity_token':self._knowledge.token('entity',f'lifetime:{identity}' if lifetime_schema else identity),
+                     'type_token':self._knowledge.token('type',kind),
                      'name':name}
+                # Private eligibility is derived only from this lawful row: a
+                # mobile, positioned unit outside a building/carrier/hangar.
+                eligibility[row['entity_token']]=(
+                    kind!=LARVA_TYPE and bool(flags&S5_OWN_POSITION)
+                    and not (flags&(S5_OWN_BUILDING|S5_OWN_CARRIER_POSITION|S5_OWN_LOADED)))
                 if kind!=LARVA_TYPE:row['position']={'x':x,'y':y} if flags&2 else None
                 if work_schema:
                     valid,queued,*work_names=record[7:16]
@@ -302,6 +323,13 @@ class Stage5(Stage4):
                         upgrade_name=label(upgrade) if upgrade else None
                         row['work']={'research':research_name,'upgrade':upgrade_name}
                         required+=sum(len(n.encode('utf8')) for n in (research_name,upgrade_name) if n is not None)
+                learning_key=(kind,bool(flags&S5_OWN_INCOMPLETE),bool(flags&S5_OWN_HIDDEN_HEALTH))
+                if learning_key not in learning_needed:
+                    learning_needed[learning_key]=_needs_learning(
+                        self._knowledge,kind,owned=True,
+                        has_health=not learning_key[2],
+                        incomplete_building=learning_key[1])
+                if learning_needed[learning_key]:row['unlearned']=True
                 amount=supply.value(kind,supply_snapshot) if supply is not None else None
                 if amount is not None and amount>0:row['supply_provided']=amount
                 command_identity=record[16] if lifetime_schema else identity
@@ -321,56 +349,104 @@ class Stage5(Stage4):
         self._last_own_by_identity=by_identity
         self._last_own_by_command_identity=by_command_identity
         self._last_own_types_by_command_identity=types_by_command_identity
+        self._last_own_epoch=s['epoch']
         result={'status':'observed','observed_tick_ms':s['executed_tick'],'units':rows}
+        self.last_own_unit_eligibility=eligibility
         if lifetime_schema:result['identity_semantics']='lawful_observation_lifetimes; hidden_gaps_not_linked'
         return result
 
-    def current_selection(self,*,text_budget_bytes=65536,encoding='cp1252'):
-        """Current real selection, with names/positions of its own members.
+    def selected_members_for_ticket(self,ticket,*,text_budget_bytes=65536,encoding='cp1252',reuse_own_snapshot=False):
+        """Join an already observed live ticket to lawfully selected own values.
 
-        Ownership lookup uses the same current own snapshot. Enemy selections
-        do not acquire any off-screen name, position or dynamic value here.
+        This is the same selected_own_values path as current_selection, without
+        the redundant initial ticket probe when a foreground action already
+        returned the live ticket. A missing local member falls back once to a
+        fresh own snapshot; unselected or enemy pointers never acquire values.
         """
-        result=super().current_selection()
-        if 'selection' not in result:return result
-        ticket=result['selection']
-        own=self.own_units(unit_budget=1700,text_budget_bytes=text_budget_bytes,encoding=encoding)
-        if own['status']!='observed':return own
-        base=self._client.peek()['game_base']
-        pool=base+(0x5b2e68-0x400000)
+        if isinstance(ticket,dict):
+            try:ticket=SelectionTicket(**{key:ticket[key] for key in SelectionTicket.__dataclass_fields__})
+            except (KeyError,TypeError):return {'status':'rejected','reason':'invalid_selection_ticket'}
+        if not isinstance(ticket,SelectionTicket):
+            return {'status':'rejected','reason':'invalid_selection_ticket'}
+        values=asdict(ticket)
+        if any(type(value) is not int or value<0 for value in values.values()):
+            return {'status':'rejected','reason':'invalid_selection_ticket'}
+        if ticket.pid!=self._pid or ticket.process_creation!=self._creation:
+            return {'status':'rejected','reason':'different_process'}
+        if ticket.epoch>=2**32 or ticket.generation>=2**32 or not 0<=ticket.count<=12:
+            return {'status':'rejected','reason':'invalid_selection_ticket'}
+        before=self._client.peek()
+        if before.get('epoch')!=self._epoch or before.get('epoch')!=ticket.epoch:
+            return {'status':'rejected','reason':'stale_epoch'}
+        base=before['game_base'];pool=base+(0x5b2e68-0x400000)
         selected=self._client.reader.read(base+(0x684940-0x400000),48)
-        pointers=struct.unpack('<12I',selected)
-        members=[];count=0;seen=set()
-        for pointer in pointers:
+        local=struct.unpack('<I',self._client.reader.read(base+(0x4f30c0-0x400000),4))[0]
+        selected_pointers=[];count=0;seen=set()
+        for pointer in struct.unpack('<12I',selected):
             if not pointer:continue
             count+=1
             if pointer in seen or pointer<pool or pointer>=pool+1700*0x148 or (pointer-pool)%0x148:
                 return {'status':'rejected','reason':'selection_changed_during_read'}
             seen.add(pointer)
+            owner=self._client.reader.read(pointer+0x4c,1)[0]
             unique=self._client.reader.read(pointer+0xa5,1)[0]
             identity=(pointer-pool)//0x148+1 | unique<<11
+            selected_pointers.append((pointer,identity,owner==local))
+        snapshot_ok=(reuse_own_snapshot and getattr(self,'_last_own_epoch',None)==self._epoch and
+                     isinstance(getattr(self,'_last_own_by_command_identity',None),dict) and
+                     isinstance(getattr(self,'_last_own_types_by_command_identity',None),dict))
+        if snapshot_ok:
+            by_command=self._last_own_by_command_identity
+            types_by_command=self._last_own_types_by_command_identity
+            snapshot_ok=all(identity in by_command and identity in types_by_command
+                            for _,identity,owned in selected_pointers if owned)
+        if not snapshot_ok:
+            own=self.own_units(unit_budget=1700,text_budget_bytes=text_budget_bytes,encoding=encoding)
+            if own['status']!='observed':return own
+        members=[]
+        for pointer,identity,owned in selected_pointers:
+            if not owned:continue
             member=self._last_own_by_command_identity.get(identity)
-            if member is not None:
-                row=dict(member)
-                try:row.update(selected_own_values(self._client.reader,base,pointer,
-                    self._last_own_types_by_command_identity[identity],selected))
-                except RuntimeError:return {'status':'rejected','reason':'selection_changed_during_read'}
-                members.append(row)
+            if member is None:continue
+            row=dict(member)
+            try:row.update(selected_own_values(self._client.reader,base,pointer,
+                self._last_own_types_by_command_identity[identity],selected))
+            except RuntimeError:return {'status':'rejected','reason':'selection_changed_during_read'}
+            members.append(row)
         confirmation=self._request('probe',0,0,self._epoch)
         if not confirmation:return {'status':'outcome_unknown','automatic_retry':False}
         if confirmation['result']!='ok':return action_result(confirmation)
         after=confirmation['developer_after']
-        if (after['epoch']!=ticket['epoch'] or after['selection_generation']!=ticket['generation'] or
-                after['selection_count']!=ticket['count'] or count!=ticket['count']):
+        if (after['epoch']!=ticket.epoch or after['selection_generation']!=ticket.generation or
+                after['selection_count']!=ticket.count or count!=ticket.count):
             return {'status':'rejected','reason':'selection_changed_during_read'}
-        return {'selection':ticket,'owned':count>0 and len(members)==count,'members':members}
+        return {'selection':asdict(ticket),'owned':count>0 and len(members)==count,'members':members}
 
-    def __init__(self,pid,*,knowledge_path=None,bookmark_path=None,building_memory_path=None):
-        super().__init__(pid,knowledge_path=knowledge_path)
+    def current_selection(self,*,text_budget_bytes=65536,encoding='cp1252',reuse_own_snapshot=False):
+        """Current real selection, with names/positions of its own members.
+
+        Ownership lookup uses the same current own snapshot. Enemy selections
+        do not acquire any off-screen name, position or dynamic value here.
+        A caller that just sampled own_units in this epoch may reuse that
+        snapshot; any missing local member falls back to one fresh sample.
+        """
+        result=super().current_selection()
+        if 'selection' not in result:return result
+        return self.selected_members_for_ticket(result['selection'],text_budget_bytes=text_budget_bytes,
+            encoding=encoding,reuse_own_snapshot=reuse_own_snapshot)
+
+    def __init__(self,pid,*,knowledge_path=None,bookmark_path=None,building_memory_path=None,
+                 shared_knowledge_path=None,knowledge_mode='official_standard'):
+        super().__init__(pid,knowledge_path=knowledge_path,
+                         shared_knowledge_path=shared_knowledge_path,
+                         knowledge_mode=knowledge_mode)
+        self._group_card_dwell=None
+        self._learned_group_card=None
         self._bookmarks=None
         self._building_source=None
         self._building_memory=None
         self._supply=None
+        self.last_own_unit_eligibility={}
         try:
             self._supply=SupplyKnowledge(self._knowledge,self._rules)
             path=bookmark_path or Path(__file__).resolve().parents[1]/'build/stage5/view-bookmarks.sqlite3'
@@ -596,7 +672,68 @@ class Stage5(Stage4):
             return {'status':'target_required','mode':PHASES[phase],'target':asdict(target)}
         return {'status':'enqueued' if phase==4 else 'applied'}
 
+    def consume_learned_group_card(self):
+        """Pop this call's internal group-card learning handoff.
+
+        The host consumes it for public-reference projection. It is deliberately
+        never part of ``command_card``'s public return dict.
+        """
+        learned=getattr(self,'_learned_group_card',None)
+        self._learned_group_card=None
+        return learned
+
+    def _observe_group_command_card(self,state,member_types,member_stamp,
+                                    skill_items,basic_items,buttons):
+        """Learn a stable homogeneous multi-selection card after its dwell.
+
+        Box-selecting 2..12 units exposes only the shared 3x3 command card. This
+        records visible labels; it never claims single-unit armor, attack, HP,
+        production or cargo facts.
+        """
+        count=state.get('selection_count');kinds=set(member_types)
+        paused=bool(state.get('paused',False) or state.get('pause',False))
+        if (type(count) is not int or not 2<=count<=12
+                or not state.get('active') or paused or state.get('menu_open')
+                or len(kinds)!=1):
+            self._group_card_dwell=None
+            return
+        kind=next(iter(kinds))
+        skill_items=tuple(sorted(skill_items))
+        basic_items=tuple(sorted(basic_items))
+        stamp=(state.get('epoch'),state.get('selection_generation'),kind,
+               skill_items,basic_items)
+        raw_tick=state.get('real_tick')
+        now=raw_tick if type(raw_tick) is int else time.monotonic_ns()//1_000_000
+        wait_ms=state.get('details_wait_ms')
+        if type(wait_ms) is not int or wait_ms<=0:wait_ms=2000
+        # Human-visible details stay on screen for a real dwell: never accept a
+        # native/task value below the two-second learning floor.
+        wait_ms=max(2000,wait_ms)
+        dwell=getattr(self,'_group_card_dwell',None)
+        if dwell is None or dwell[0]!=stamp or now<dwell[1]:
+            # A backwards/restarted tick is not elapsed dwell; begin a fresh
+            # interval instead of treating the wrapped difference as complete.
+            self._group_card_dwell=(stamp,now)
+            return
+        if ((now-dwell[1])&0xFFFFFFFF)<wait_ms:return
+        self._knowledge.learn_skill_names(kind,[{'slot':slot,'name':name}
+                                                for slot,name in skill_items])
+        self._knowledge.commit()
+        visible={slot:name for slot,name in skill_items}
+        for item in buttons:
+            if item.get('slot') in visible:item['name']=visible[item['slot']]
+        if skill_items or basic_items:
+            owner=(member_stamp[1] if isinstance(member_stamp,(tuple,list))
+                   and len(member_stamp)>1 else None)
+            self._learned_group_card={
+                'type_token':self._knowledge.token('type',kind),
+                'owner_token':self._knowledge.token('owner',owner) if owner is not None else None,
+                'name':self._knowledge.name(kind),
+                'skills':[{'slot':slot,'name':name} for slot,name in skill_items],
+                'basic_commands':[{'slot':slot,'name':name} for slot,name in basic_items]}
+
     def command_card(self,ticket,*,text_budget_bytes,encoding):
+        self._learned_group_card=None
         if not self._validate_ticket(ticket):return {'status':'rejected','reason':'different_process'}
         if type(text_budget_bytes) is not int or text_budget_bytes<1 or not encoding:
             raise ValueError('explicit positive text budget and encoding required')
@@ -645,18 +782,23 @@ class Stage5(Stage4):
         # Only committed local copies are parsed below. Labels are immutable
         # loaded strings; no mutable node/passenger pointer becomes public.
         text=PanelText(self._client.reader,text_budget_bytes,encoding);buttons=[]
-        queue=[]
+        queue=[];placement_button=False;skill_items=[];basic_items=[]
         try:
             for row in struct.iter_unpack('<8I',raw):
                 slot,enabled,handler,argument,label,category,node,record=row
                 if not slot:continue
+                if handler in BUILD_PLACEMENT_HANDLERS:placement_button=True
                 item={'slot':slot,'enabled':bool(enabled),'button':asdict(ButtonTicket(
                     **asdict(ticket),card_generation=state['command_generation'],slot=slot))}
                 skill=category==3 or (category==0 and handler not in BASIC_ACTIONS)
                 if skill:
                     candidate=text.string(label)
+                    skill_items.append((slot,candidate))
                     if self._knowledge.known_skill_name(member_types,slot,candidate):item['name']=candidate
-                else:item['name']=text.string(label)
+                else:
+                    label_name=text.string(label)
+                    basic_items.append((slot,label_name))
+                    item['name']=label_name
                 buttons.append(item)
             for i in range(state['queue_count']):
                 kind=state[f'queue_type{i}']
@@ -680,7 +822,21 @@ class Stage5(Stage4):
             name=self._knowledge.name(kind)
             if name is not None:item['name']=name
             cargo.append(item)
+        # Placement callbacks alone also occur on a normal building card (for
+        # example a direct Build Addon). The menu-set id is the live submenu
+        # witness: a default single/group card keeps one selected unit type as
+        # its set id, while an opened build submenu uses a distinct button set.
+        build_submenu=False
+        if placement_button:
+            menu=None
+            try:menu=struct.unpack('<H',self._client.reader.read(
+                state['game_base']+(0x68c9bc-0x400000),2))[0]
+            except Exception:pass
+            build_submenu=(menu is not None and menu not in member_types)
+        self._observe_group_command_card(state,member_types,member_stamp,
+                                         skill_items,basic_items,buttons)
         return {'status':'observed','buttons':buttons,'mode':PHASES.get(state['command_phase'],'ready'),
+                'build_submenu':build_submenu,
                 'cargo':cargo,'production_queue':queue,'production':asdict(ProductionTicket(
                     **asdict(ticket),queue_generation=state['queue_serial']))}
 

@@ -73,7 +73,8 @@ static void stage4_contacts_restart(void);
 enum { S4_EVENT_TEXT=1,S4_EVENT_ATTACK=2,S4_EVENT_CONTACT=3,
        S4_EVENT_STALE=4,S4_EVENT_IN_VIEW=5,S4_EVENT_RESEARCH=6,S4_EVENT_UPGRADE=7,S5_EVENT_NOTIFICATION=8,
        S5_EVENT_WEAPON=9,S5_EVENT_NUCLEAR_MARKER=10,
-       S5_EVENT_NUCLEAR_STALE=11,S5_EVENT_NUCLEAR_WARNING=12,S5_EVENT_MINIMAP_PING=13 };
+       S5_EVENT_NUCLEAR_STALE=11,S5_EVENT_NUCLEAR_WARNING=12,S5_EVENT_MINIMAP_PING=13,
+       S5_EVENT_ALLIED_CONTACT=14,S5_EVENT_RESCUABLE_CONTACT=15,S5_EVENT_NEUTRAL_CONTACT=16 };
 #endif
 
 static int readable(const void *p, SIZE_T n) {
@@ -196,11 +197,15 @@ static int action_due(DWORD now) {
    mask is added here. Target geometry table operands are retained in the
    static evidence; these dimensions never become playable observations. */
 static int operable_part(void *unit) {
-    BYTE *u=(BYTE*)unit,*sprite=*(BYTE**)(u+0x0c);
-    short *extent=(short*)(AT(0x6af898)+*(unsigned short*)(u+0x64)*8u);
+    BYTE *u,*sprite;
+    short *extent;
     int x,y,l,t,r,b,px,py;
     int w=SCAPI_State.width_tiles*32-SCAPI_State.camera_max_x;
     int h=SCAPI_State.height_tiles*32-SCAPI_State.camera_max_y;
+    if (!valid_unit(unit)) return 0;
+    u=(BYTE*)unit;
+    sprite=*(BYTE**)(u+0x0c);
+    extent=(short*)(AT(0x6af898)+*(unsigned short*)(u+0x64)*8u);
     if (!readable(extent,8)) return 0;
     x=*(short*)(sprite+0x14); y=*(short*)(sprite+0x16);
     if (point_on_screen(x,y)==SC_OK) return 1;

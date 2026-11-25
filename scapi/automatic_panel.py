@@ -35,7 +35,8 @@ def decode_completed(raw, *, encoding):
             state['panel_type']>=228 or state['panel_owner']>=12):
         raise RuntimeError('automatic_panel_invalid_completed_state')
     p=PROFILE.unpack_from(raw,HEADER.size+ctypes.sizeof(State))
-    if p[0] not in (0,1) or p[5] not in (0,1,2) or p[6] not in (0,1) or p[11] not in (0,1) or p[12] not in (0,1):
+    if (p[0] not in (0,1) or p[5] not in (0,1,2) or p[6] not in (0,1) or
+            p[11] not in (0,1) or p[12] not in (0,1) or p[17] not in (0,1)):
         raise RuntimeError('automatic_panel_invalid_profile_flags')
     profiles={}
     if p[0]:profiles['armor']={'format':1,'base':p[1],'group':p[2],'increment':p[3],
@@ -76,6 +77,7 @@ def decode_completed(raw, *, encoding):
     if end!=size or name is None:raise RuntimeError('automatic_panel_incomplete_text')
     return {'sequence':sequence,'tick':tick,'state':state,'profiles':profiles,'name':name,
             'weapon_names':names,'weapon_evidence':evidence,
+            'incomplete_building':bool(p[17]),
             'card':{'basic_commands':basic,'skills':skills} if state['panel_owned'] and p[11] else None,
             'card_status':'available' if p[11] else 'unavailable',
             'build_options':buildings if state['panel_owned'] and p[5]==1 else None,
@@ -108,15 +110,17 @@ def drain_completed(api, *, encoding):
         knowledge.observe_armor_extra(kind,s['panel_owner'],s['panel_armor_bonus']-s['panel_armor_level'])
         result=selected_panel_result({'result':'ok','developer_after':s},knowledge,
             completion['card'],completion['profiles'],completion['weapon_names'],
-            completion['weapon_evidence'],commit=False)
+            completion['weapon_evidence'],commit=False,
+            incomplete_building=completion['incomplete_building'])
         knowledge.remember_name(kind,completion['name']);result['panel']['name']=completion['name']
-        if completion['build_options_status'] is not None:
-            knowledge.build_options(kind,{'status':completion['build_options_status'],
-                'options':completion['build_options']},learn=True)
-        if completion['build_options'] is not None:
-            result['panel']['build_options']=completion['build_options']
-        if completion['build_options_status'] is not None:
-            result['panel']['build_options_status']=completion['build_options_status']
+        if not completion['incomplete_building']:
+            if completion['build_options_status'] is not None:
+                knowledge.build_options(kind,{'status':completion['build_options_status'],
+                    'options':completion['build_options']},learn=True)
+            if completion['build_options'] is not None:
+                result['panel']['build_options']=completion['build_options']
+            if completion['build_options_status'] is not None:
+                result['panel']['build_options_status']=completion['build_options_status']
         if completion['work_progress']:result['panel']['work_progress']=completion['work_progress']
         if s['panel_owned']:result['panel']['card_status']=completion['card_status']
         observation={'kind':'selected_panel','status':'observed','observed_tick_ms':completion['tick'],

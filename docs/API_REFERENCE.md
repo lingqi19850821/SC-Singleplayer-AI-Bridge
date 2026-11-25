@@ -8,6 +8,10 @@ Internal native transport and trusted-host helpers are separate from lawful play
 
 [Source](../scapi/__init__.py)
 
+```python
+__all__ = ['Stage5', 'Actions', 'SelectionTicket', 'ButtonTicket', 'TargetTicket', 'ProductionTicket', 'CargoTicket']
+```
+
 ## scapi.actions
 
 [Source](../scapi/actions.py)
@@ -113,6 +117,12 @@ has_pending(self)
 ```
 
 ```python
+has_pending_non_learning(self)
+```
+
+True when a non-learning batch (startup/tips/world scan) awaits ack.
+
+```python
 high_water(self)
 ```
 
@@ -141,12 +151,24 @@ __init__(self, runtime, outbox, publish)
 ```
 
 ```python
-configure(self, snapshot)
+configure(self, snapshot, *, calm_interval_ms=None, combat_hold_seconds=10.0, screen_terrain_same_origin_interval_s=None, screen_terrain_diff_cells_threshold=None)
 ```
+
+```python
+mark_action_completed(self)
+```
+
+Force fresh continuous state on the next scan after an action/wait.
 
 ```python
 remember_authoring(self, result)
 ```
+
+```python
+remember_experience(self, result, role=None)
+```
+
+Queue one authored entry page for the role that actually wrote it.
 
 ```python
 remember_target(self, result)
@@ -194,7 +216,18 @@ step(self)
 Advance one logical read on the owning worker, never a second thread.
 
 ```python
-action_feedback(self, request, result)
+pump_events_only(self)
+```
+
+Drain new journal events without any gameplay observation or action.
+
+Used only by a held session that must keep cutscene/transmission text
+flowing. It shares the normal scan's durable event cursor, so a later
+full scan never emits the same event twice. View, terrain, selection,
+resources and every native action remain untouched.
+
+```python
+action_feedback(self, request, result, *, enrich_selection=False)
 ```
 
 Fresh next-action tickets, plus explicitly dated background state.
@@ -419,7 +452,7 @@ read(self, *, limit, cursor=None)
 ### ExperienceStore
 
 ```python
-__init__(self, store, *, profile_id)
+__init__(self, store, *, profile_id, shared_store=None, shared_profile_id=None)
 ```
 
 ```python
@@ -427,28 +460,66 @@ close(self)
 ```
 
 ```python
-record(self, *, kind, content, applicability, confidence, provenance, run_ref, tags, text_budget_bytes, author_role=None)
+read_latest_owned_payload(self, entry_id, *, author_role)
+```
+
+Latest validated payload for entry_id's chain, only for its owner.
+
+Returns None when the entry is missing, owned by a different role, or
+the stored payload no longer passes byte/field integrity checks.
+
+```python
+record(self, *, kind, content, applicability, confidence, provenance, run_ref, tags, text_budget_bytes, author_role=None, scope='episode')
 ```
 
 ```python
-revise(self, entry_id, *, kind, content, applicability, confidence, provenance, run_ref, tags, text_budget_bytes, author_role=None)
+revise(self, entry_id, *, kind, content, applicability, confidence, provenance, run_ref, tags, text_budget_bytes, author_role=None, scope=None)
 ```
 
 ```python
-refute(self, entry_id, *, content, applicability, confidence, provenance, run_ref, tags, text_budget_bytes, author_role=None)
+refute(self, entry_id, *, content, applicability, confidence, provenance, run_ref, tags, text_budget_bytes, author_role=None, scope=None)
 ```
 
 Append the counterexample and a refuted status; retain old evidence.
 
 ```python
-read(self, *, limit, text_budget_bytes, entry_id=None, keyword=None, tags=None, cursor=None, history=False, author_role=None)
+delete(self, entry_id, *, author_role=None, scope=None)
+```
+
+Physically remove one root chain, including all tags and revisions.
+
+```python
+promote(self, entry_id, *, run_ref, author_role=None, kind=None, content=None, applicability=None, confidence=None, provenance=None, tags=None, text_budget_bytes=65536)
+```
+
+Move the latest episode revision into the persistent global notebook.
+
+A durable promotion record (source chain root -> global entry) commits
+atomically with the global note. If the episode-chain deletion then
+fails, a retry finds that record, finishes the deletion, and returns the
+already-promoted note without creating a duplicate.
+
+```python
+read(self, *, limit, text_budget_bytes, entry_id=None, keyword=None, tags=None, cursor=None, history=False, author_role=None, scope='all')
 ```
 
 ```python
-list(self, *, author_role, limit=32, cursor=None, text_budget_bytes=65536)
+list(self, *, author_role, limit=32, cursor=None, text_budget_bytes=65536, scope='all')
 ```
 
 Host-owned GUI page of this role's latest claims, in the same SQLite.
+
+### _RoleExperienceResult
+
+```python
+execute_role_experience(store, *, role, args, runtime_run_ref, offline=False)
+```
+
+One validated, role-owned execution path for host and offline CLI.
+
+Authored notes remain player_authored_not_api_verified in the store. This
+boundary adds ergonomic defaults and run_ref handling only; rejection
+details are fixed strings so SQL, paths and tracebacks never escape.
 
 ## scapi.lifecycle
 
@@ -615,7 +686,7 @@ read_own_card(reader, state, text)
 ### PanelKnowledge
 
 ```python
-__init__(self, scope, path=':memory:')
+__init__(self, scope, path=':memory:', *, shared_path=None, knowledge_mode='official_standard')
 ```
 
 ```python
@@ -623,7 +694,13 @@ close(self)
 ```
 
 ```python
-remember_public_reference(self, token, source, facts, *, name=None, owner_token=None, observation=None, notice_run_ref=None)
+reference_facts(self, token, source, *, owner_token=None)
+```
+
+Read current scope's stored static facts for one token/source pair.
+
+```python
+remember_public_reference(self, token, source, facts, *, name=None, owner_token=None, observation=None, notice_run_ref=None, merge_static=False)
 ```
 
 Project only already lawful public facts, never import old scopes.
@@ -663,6 +740,80 @@ remember_name(self, kind, name)
 ```python
 name(self, kind)
 ```
+
+```python
+mark_stats_known(self, kind, marked_at_utc=None)
+```
+
+Record completed numeric stats for any observed relation.
+
+```python
+mark_owned_known(self, kind, marked_at_utc=None)
+```
+
+Record a completed owned-card observation and its legacy full marker.
+
+```python
+mark_fully_known(self, kind, marked_at_utc=None)
+```
+
+Legacy callers stay consistent with the split durable markers.
+
+```python
+mark_detector(self, kind, *, commit=True)
+```
+
+Record a legally visible selected-panel ``Detector`` status label.
+
+```python
+detector(self, kind)
+```
+
+True only when observed; unknown stays None, never false.
+
+```python
+is_stats_known(self, kind)
+```
+
+Stats are complete for any relation; legacy full markers still count.
+
+```python
+is_owned_card_known(self, kind)
+```
+
+Owned-card truth; legacy rows require skills proof to avoid non-owned.
+
+```python
+has_historical_nonempty_build_options(self, kind)
+```
+
+```python
+has_current_scope_build_options(self, kind)
+```
+
+```python
+needs_learning(self, kind, *, owned, has_health=True, incomplete_building=False)
+```
+
+Single sparse truth for an unlearned public row; never preloads.
+
+```python
+kind_for_token(self, token)
+```
+
+Resolve one opaque type token by the private salted token space.
+
+```python
+client_learning_catalog(self)
+```
+
+Private host/GUI catalog; never part of a model-facing operation.
+
+```python
+client_learning_detail(self, token)
+```
+
+Private host/GUI detail; raw kind/profile/weapon bytes never leave.
 
 ```python
 known_name(self, kind, current_label)
@@ -711,6 +862,22 @@ value(self, kind, channel, grade=None, profile=None)
 ```python
 skills(self, kind, current=None, learn=False)
 ```
+
+```python
+learn_skill_names(self, kind, skills)
+```
+
+Learn visible group-card labels without an exact single-unit card signature.
+
+A multi-selection exposes only the shared 3x3 card, never a single unit's
+complete skill set. Recording those labels in ``learned_panel_skill_name_v1``
+lets the current card show a lawfully observed label again, but deliberately
+does not write ``learned_panel_skills_v3``: a group-only card must never
+become an exact-signature match for an individual unit.
+
+Like :meth:`skills`, this method leaves the commit to its caller. It returns
+the ``(slot, name)`` pairs actually inserted, in input order, including a
+pair newly inserted only into the attached shared store.
 
 ```python
 known_skill_name(self, kinds, slot, name)
@@ -853,7 +1020,17 @@ project_view(result, requested)
 ### ReadyRuntime
 
 ```python
-__init__(self, api, events, log, *, profile_id, lifecycle, run_ref, capabilities=(), tutorial_depot_limit=None, tutorial_new_depot_intents=None, diagnostics='full')
+__init__(self, api, events, log, *, profile_id, lifecycle, run_ref, capabilities=(), tutorial_depot_limit=None, tutorial_new_depot_intents=None, diagnostics='full', role_experience_paths=None, shared_experience_paths=None, shared_experience_profile='official_standard')
+```
+
+```python
+experience_for(self, role)
+```
+
+Role notebook when configured; the legacy shared store otherwise.
+
+```python
+shared_experience_active(self)
 ```
 
 ```python
@@ -891,6 +1068,12 @@ suspend(self)
 ```
 
 Disarm, close event reader and Stage5 workers; parent stops collector.
+
+```python
+close(self)
+```
+
+Commit/close owned persistence in addition to normal runtime cleanup.
 
 ```python
 dispatch(self, op, args)
@@ -954,7 +1137,7 @@ selected_own_values(reader, game_base, pointer, kind, selected)
 [Source](../scapi/stage4.py)
 
 ```python
-selected_panel_result(reply, knowledge=None, card=None, profiles=None, weapon_names=None, weapon_evidence=None, reused_weapons=None, commit=True)
+selected_panel_result(reply, knowledge=None, card=None, profiles=None, weapon_names=None, weapon_evidence=None, reused_weapons=None, commit=True, incomplete_building=False, status_text=None)
 ```
 
 ### Stage4
@@ -966,7 +1149,7 @@ control_state(self)
 Current control ownership; subtitles alone never imply a lock.
 
 ```python
-__init__(self, pid, *, knowledge_path=None)
+__init__(self, pid, *, knowledge_path=None, shared_knowledge_path=None, knowledge_mode='official_standard')
 ```
 
 ```python
@@ -1153,16 +1336,29 @@ containment positions are explicit nulls, never old coordinates.
 Larva locations are omitted while their entities/names remain present.
 
 ```python
-current_selection(self, *, text_budget_bytes=65536, encoding='cp1252')
+selected_members_for_ticket(self, ticket, *, text_budget_bytes=65536, encoding='cp1252', reuse_own_snapshot=False)
+```
+
+Join an already observed live ticket to lawfully selected own values.
+
+This is the same selected_own_values path as current_selection, without
+the redundant initial ticket probe when a foreground action already
+returned the live ticket. A missing local member falls back once to a
+fresh own snapshot; unselected or enemy pointers never acquire values.
+
+```python
+current_selection(self, *, text_budget_bytes=65536, encoding='cp1252', reuse_own_snapshot=False)
 ```
 
 Current real selection, with names/positions of its own members.
 
 Ownership lookup uses the same current own snapshot. Enemy selections
 do not acquire any off-screen name, position or dynamic value here.
+A caller that just sampled own_units in this epoch may reuse that
+snapshot; any missing local member falls back to one fresh sample.
 
 ```python
-__init__(self, pid, *, knowledge_path=None, bookmark_path=None, building_memory_path=None)
+__init__(self, pid, *, knowledge_path=None, bookmark_path=None, building_memory_path=None, shared_knowledge_path=None, knowledge_mode='official_standard')
 ```
 
 ```python
@@ -1222,6 +1418,15 @@ control_guide()
 ```
 
 Current interface contracts; automatic information, no play advice.
+
+```python
+consume_learned_group_card(self)
+```
+
+Pop this call's internal group-card learning handoff.
+
+The host consumes it for public-reference projection. It is deliberately
+never part of ``command_card``'s public return dict.
 
 ```python
 command_card(self, ticket, *, text_budget_bytes, encoding)
@@ -1434,6 +1639,17 @@ aligned(value)
 ```
 
 ```python
+build_screen_terrain(terrain, store=None)
+```
+
+Render the observed live/fog screen as compact 16x16px characters.
+
+Current cells use live walkability so doors are visible immediately. Fog
+cells use their static ground attachment, while remembered creep and an
+unresolved terrain label may fall back to this scope's lawfully learned
+SQLite history. Any missing 8px subcell keeps its 16px cell unknown.
+
+```python
 merge_known(old, new)
 ```
 
@@ -1469,6 +1685,15 @@ observe(self, terrain, *, observed_session, expected_session)
 ```
 
 Caller supplies identities from the completed lawful sample boundary.
+
+```python
+read_grid(self, args)
+```
+
+Render one bounded rectangle entirely from last-observed SQLite rows.
+
+This is history, never a current screen: every remembered creep tile is
+creep_fog, and a rectangle tile with no stored row is unknown.
 
 ```python
 read(self, args)
@@ -1719,6 +1944,230 @@ encode_public_frame(value)
 
 Clone known public frame paths; arbitrary experience contents stay untouched.
 
+## tools.__init__
+
+[Source](../tools/__init__.py)
+
+## tools.build_native
+
+[Source](../tools/build_native.py)
+
+```python
+pe32(path)
+```
+
+```python
+compile_native(compiler, arguments)
+```
+
+```python
+require_max_path(targets, parser)
+```
+
+```python
+refuse_existing(targets, parser)
+```
+
+```python
+verify_loader_allowlist(loader, dll)
+```
+
+```python
+main(argv=None)
+```
+
+## tools.native_episode_artifacts
+
+[Source](../tools/native_episode_artifacts.py)
+
+```python
+episode_spec(candidate)
+```
+
+Validate only the exact host recipe, not an arbitrary DLL/EXE directory.
+
+```python
+approved_episode_candidate(candidate)
+```
+
+```python
+approved_episode_loader(loader)
+```
+
+```python
+build_episode_candidate(*, compiler=None)
+```
+
+Copy unchanged bridge bytes and compile one exact-path loader, once.
+
+No game/process discovery or injection occurs here. Old images are never
+overwritten or deleted; their private memory remains until ordinary game exit.
+
+## tools.native_loader_runtime
+
+[Source](../tools/native_loader_runtime.py)
+
+### NativeLoaderRuntimeError
+
+```python
+__init__(self, message, receipt)
+```
+
+### _GUID
+
+### _FILE_INFO
+
+### _ACL_INFO
+
+### _SID_ATTR
+
+### _LUID
+
+### _LUID_ATTR
+
+### _OVERLAPPED
+
+### _STARTUPINFO
+
+### _PROCESS_INFO
+
+### _Windows
+
+```python
+__init__(self)
+```
+
+```python
+check(ok, operation)
+```
+
+```python
+close(self, handle)
+```
+
+```python
+open(self, path, *, write=False, create=False, directory=False, share=1)
+```
+
+```python
+local_app_data(self)
+```
+
+```python
+sid_rid(self, sid)
+```
+
+```python
+label(self, handle)
+```
+
+```python
+token(self, process)
+```
+
+```python
+copy_and_lock(self, source, target)
+```
+
+```python
+probe(self, path, receipt)
+```
+
+### LoaderRuntime
+
+```python
+__init__(self, windows, source)
+```
+
+```python
+mark_execution_started(self)
+```
+
+```python
+close(self, *, completed=False)
+```
+
+Release handles; never let file cleanup replace installation ownership.
+
+A thrown/unknown execution retains its unique copy. Only a returned
+process result or a never-started attempt permits removal.
+
+```python
+prepare_loader_runtime(source_loader)
+```
+
+Pin a fixed or exact recipe-bound episode loader and inspect its child.
+
+## tools.role_experience_cli
+
+[Source](../tools/role_experience_cli.py)
+
+```python
+parser()
+```
+
+```python
+main(argv=None)
+```
+
+## tools.session_native_cleanup
+
+[Source](../tools/session_native_cleanup.py)
+
+```python
+approved_candidate(candidate)
+```
+
+### CleanupBlocked
+
+```python
+validate_original_snapshot(binding, original)
+```
+
+Reject absent/partial/other-run snapshots before any mutation.
+
+```python
+validate_quiescence(binding, receipt)
+```
+
+```python
+module_entry_for_api(api)
+```
+
+Use the exact ctypes structure bound to this API instance's functions.
+
+CLI imports can load stage2_readprobe under both package and bare names.
+Equal layouts remain distinct Python ctypes classes; do not cast past the
+type check or replace a live function's declared signature.
+
+```python
+read_current_inventory(client)
+```
+
+Future authorized use only: reuse the owned handle, enumerate its modules.
+
+No process discovery and no Client construction. All returned SCAPI state
+reads are from current modules of this exact process, never an old list.
+
+```python
+verify_native_cleanup(client, *, binding, original, quiescence, drained, inventory_reader=read_current_inventory)
+```
+
+Independent read-only check; also usable after an unknown request result.
+
+Uses no request(), arm(), ACK, external process exit or API.close(). Missing
+evidence raises CleanupBlocked; mismatches return fully_withdrawn:false.
+
+### NativeCleanupAttempt
+
+```python
+__init__(self, *, binding, original)
+```
+
+```python
+execute(self, client, *, quiescence, drain_after_stop, inventory_reader=read_current_inventory)
+```
+
 ## tools.stage2_readprobe
 
 [Source](../tools/stage2_readprobe.py)
@@ -1857,29 +2306,51 @@ configure_detail_test(self, wait_ms)
 
 Explicit development value; this does not choose a production policy.
 
-## tools.stage5_client
+## tools.stage4_event_collector
 
-[Source](../tools/stage5_client.py)
-
-### State
-
-### Client
+[Source](../tools/stage4_event_collector.py)
 
 ```python
-arm(self, enabled, interval_ms=None)
+record_hash(data)
 ```
 
-## tools.stage5_visible_phase_client
+```python
+decode_slot(raw, sequence, epoch)
+```
 
-[Source](../tools/stage5_visible_phase_client.py)
+### StreamReader
 
-### State
+```python
+__init__(self, client, generation)
+```
 
-### Client
+```python
+header(self)
+```
+
+```python
+read_batch(self, limit)
+```
+
+```python
+acknowledge(self, next_sequence)
+```
+
+```python
+write_status(path, value)
+```
+
+```python
+main(*, client_factory=Client, evidence_stage='stage4', evidence_root=None)
+```
 
 ## tools.stage4_event_journal
 
 [Source](../tools/stage4_event_journal.py)
+
+```python
+__all__ = ['AppendResult', 'EVENT_TEXT_BYTES', 'Event', 'Journal', 'JournalClosedError', 'JournalConflict', 'JournalCursorError', 'JournalError', 'JournalEvent', 'JournalOrderError', 'JournalSchemaError', 'JournalValidationError', 'Page', 'RunStatus']
+```
 
 ### JournalError
 
@@ -2020,221 +2491,23 @@ Read at most ``limit`` events after ``cursor``.
 at most ``limit + 1`` rows to determine ``has_more``; it never loads
 the whole run.
 
-## tools.stage4_event_collector
+## tools.stage5_client
 
-[Source](../tools/stage4_event_collector.py)
+[Source](../tools/stage5_client.py)
 
-```python
-record_hash(data)
-```
+### State
 
-```python
-decode_slot(raw, sequence, epoch)
-```
-
-### StreamReader
+### Client
 
 ```python
-__init__(self, client, generation)
+arm(self, enabled, interval_ms=None)
 ```
 
-```python
-header(self)
-```
+## tools.stage5_visible_phase_client
 
-```python
-read_batch(self, limit)
-```
+[Source](../tools/stage5_visible_phase_client.py)
 
-```python
-acknowledge(self, next_sequence)
-```
+### State
 
-```python
-write_status(path, value)
-```
-
-```python
-main(*, client_factory=Client, evidence_stage='stage4', evidence_root=None)
-```
-
-## tools.session_native_cleanup
-
-[Source](../tools/session_native_cleanup.py)
-
-```python
-approved_candidate(candidate)
-```
-
-### CleanupBlocked
-
-```python
-validate_original_snapshot(binding, original)
-```
-
-Reject absent/partial/other-run snapshots before any mutation.
-
-```python
-validate_quiescence(binding, receipt)
-```
-
-```python
-module_entry_for_api(api)
-```
-
-Use the exact ctypes structure bound to this API instance's functions.
-
-CLI imports can load stage2_readprobe under both package and bare names.
-Equal layouts remain distinct Python ctypes classes; do not cast past the
-type check or replace a live function's declared signature.
-
-```python
-read_current_inventory(client)
-```
-
-Future authorized use only: reuse the owned handle, enumerate its modules.
-
-No process discovery and no Client construction. All returned SCAPI state
-reads are from current modules of this exact process, never an old list.
-
-```python
-verify_native_cleanup(client, *, binding, original, quiescence, drained, inventory_reader=read_current_inventory)
-```
-
-Independent read-only check; also usable after an unknown request result.
-
-Uses no request(), arm(), ACK, external process exit or API.close(). Missing
-evidence raises CleanupBlocked; mismatches return fully_withdrawn:false.
-
-### NativeCleanupAttempt
-
-```python
-__init__(self, *, binding, original)
-```
-
-```python
-execute(self, client, *, quiescence, drain_after_stop, inventory_reader=read_current_inventory)
-```
-
-## tools.native_loader_runtime
-
-[Source](../tools/native_loader_runtime.py)
-
-### NativeLoaderRuntimeError
-
-```python
-__init__(self, message, receipt)
-```
-
-### _GUID
-
-### _FILE_INFO
-
-### _ACL_INFO
-
-### _SID_ATTR
-
-### _LUID
-
-### _LUID_ATTR
-
-### _OVERLAPPED
-
-### _STARTUPINFO
-
-### _PROCESS_INFO
-
-### _Windows
-
-```python
-__init__(self)
-```
-
-```python
-check(ok, operation)
-```
-
-```python
-close(self, handle)
-```
-
-```python
-open(self, path, *, write=False, create=False, directory=False, share=1)
-```
-
-```python
-local_app_data(self)
-```
-
-```python
-sid_rid(self, sid)
-```
-
-```python
-label(self, handle)
-```
-
-```python
-token(self, process)
-```
-
-```python
-copy_and_lock(self, source, target)
-```
-
-```python
-probe(self, path, receipt)
-```
-
-### LoaderRuntime
-
-```python
-__init__(self, windows, source)
-```
-
-```python
-mark_execution_started(self)
-```
-
-```python
-close(self, *, completed=False)
-```
-
-Release handles; never let file cleanup replace installation ownership.
-
-A thrown/unknown execution retains its unique copy. Only a returned
-process result or a never-started attempt permits removal.
-
-```python
-prepare_loader_runtime(source_loader)
-```
-
-Pin a fixed or exact recipe-bound episode loader and inspect its child.
-
-## tools.native_episode_artifacts
-
-[Source](../tools/native_episode_artifacts.py)
-
-```python
-episode_spec(candidate)
-```
-
-Validate only the exact host recipe, not an arbitrary DLL/EXE directory.
-
-```python
-approved_episode_candidate(candidate)
-```
-
-```python
-approved_episode_loader(loader)
-```
-
-```python
-build_episode_candidate(*, compiler=None)
-```
-
-Copy unchanged bridge bytes and compile one exact-path loader, once.
-
-No game/process discovery or injection occurs here. Old images are never
-overwritten or deleted; their private memory remains until ordinary game exit.
+### Client
 

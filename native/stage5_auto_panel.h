@@ -19,6 +19,10 @@ static DWORD stage5_auto_last_card_valid;
 static ScapiButton stage5_detail_seen_card[9];
 static DWORD stage5_detail_seen_epoch,stage5_detail_seen_selection,stage5_detail_seen_menu;
 static DWORD stage5_detail_seen_hash,stage5_detail_seen_valid;
+/* The UI-thread graph walk previously held ~139 KiB in its stack frame. Keep
+   the bounded scratch arrays in file scope; only the UI thread reaches here. */
+static BYTE stage5_auto_visited[8192],stage5_auto_kinds[228];
+static WORD stage5_auto_pending[65536];
 
 static DWORD stage5_detail_card_stamp(BYTE *u) {
     ScapiButton fresh[9];DWORD i,hash=0,flags;
@@ -115,9 +119,12 @@ static int stage5_auto_add(ScapiPanelText *rows,BYTE **strings,DWORD *count,
 static int stage5_auto_builds(BYTE *u,ScapiPanelText *rows,BYTE **strings,DWORD *count) {
     /* The domain is the engine's WORD button-set id, not an arbitrary cap.
        Building kinds have exactly 228 entries in this target's loaded tables. */
-    BYTE visited[8192]={0},kinds[228]={0};WORD pending[65536];
+    BYTE *visited=stage5_auto_visited,*kinds=stage5_auto_kinds;
+    WORD *pending=stage5_auto_pending;
     DWORD head=0,tail=0,owner=u[0x4c],i,set,n;BYTE *entry,*record,*label;
     ScapiPanelText row;
+    memset(visited,0,sizeof(stage5_auto_visited));
+    memset(kinds,0,sizeof(stage5_auto_kinds));
     pending[tail++]=*(WORD*)(u+0x94);
     visited[pending[0]>>3]|=(BYTE)(1u<<(pending[0]&7));
     while(head<tail) {
@@ -182,13 +189,8 @@ static void stage5_auto_capture(BYTE *u,DWORD *values,DWORD now) {
     ScapiAutoPanel *fresh;
     if(SCAPI_State.auto_panel_fault)return;
     if(SCAPI_State.auto_panel_ack>SCAPI_State.auto_panel_sequence){SCAPI_State.auto_panel_fault=1;return;}
-    if(SCAPI_State.auto_panel_ack!=SCAPI_State.auto_panel_sequence) {
-        if(stage5_auto_last_epoch!=SCAPI_State.epoch ||
-           stage5_auto_last_selection!=SCAPI_State.selection_generation ||
-           stage5_auto_last_started!=SCAPI_State.details_started_tick)
-            SCAPI_State.auto_panel_fault=6; /* explicit backpressure, no silent overwrite */
-        return;
-    }
+    if(SCAPI_State.auto_panel_ack!=SCAPI_State.auto_panel_sequence)
+        return; /* backpressure: wait for the host ACK, never fault the producer */
     if(stage5_auto_last_epoch==SCAPI_State.epoch &&
        stage5_auto_last_selection==SCAPI_State.selection_generation &&
        stage5_auto_last_started==SCAPI_State.details_started_tick &&
@@ -235,6 +237,9 @@ static void stage5_auto_capture(BYTE *u,DWORD *values,DWORD now) {
         p[0]=1;p[1]=w;p[2]=U8(0x6b1988+w);p[3]=U16(0x6b1e30+2*w)*factor;p[4]=U16(0x6b16e8+2*w)*factor;
     }
     fresh->profiles[11]=card_valid;
+    /* Private role17: 1 while this building is under construction and its
+       native completed bit is still clear, 0 when completed or non-building. */
+    fresh->profiles[17]=((U32(0x6b0358+type*4u)&1u) && !(*(DWORD*)(u+0xdc)&1u))?1u:0u;
     stage5_auto_progress(fresh);
     memcpy(fresh+1,rows,n*sizeof(ScapiPanelText));
     for(i=0;i<n;++i)memcpy((BYTE*)fresh+rows[i].offset,strings[i],rows[i].length);

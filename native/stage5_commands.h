@@ -19,6 +19,7 @@ static DWORD stage5_card_selection,stage5_card_epoch,stage5_card_menu;
 static DWORD stage5_queue_values[6],stage5_queue_selection;
 static DWORD stage5_queue_names[5],stage5_queue_valid=1;
 static DWORD stage5_producer_selection,stage5_producer_epoch,stage5_producer_confirmed;
+static DWORD stage5_producer_unit_type=0xffffffffu;
 static DWORD stage5_pending_selection,stage5_pending_epoch;
 static DWORD stage5_pending_mode,stage5_pending_signature[5];
 static DWORD stage5_pending_queued_order;
@@ -113,7 +114,7 @@ static DWORD stage5_collect_card(ScapiButton *rows) {
     stage5_card_collect_valid=1;return slots;
 }
 static void stage5_sample(void) {
-    ScapiButton fresh[9];DWORD count=0,i,producer=0,values[6]={0},signature[5],changed,next,suppressed;BYTE *u;
+    ScapiButton fresh[9];DWORD count=0,i,producer=0,values[6]={0},signature[5],changed,next,suppressed,producer_type;BYTE *u;
     int ended=0;
     /* A reader acquires this aligned serial BEFORE reading state and buffers.
        Odd/even publication prevents a previous count from parsing new rows. */
@@ -122,11 +123,17 @@ static void stage5_sample(void) {
     suppressed=SCAPI_State.active && SCAPI_State.tile_pointer && U8(0x68c9dc);
     if(SCAPI_State.active && SCAPI_State.tile_pointer && !stage5_collect_card(fresh))
         memset(fresh,0,sizeof(fresh));
+    u=*(BYTE**)AT(0x684940);
+    producer_type=valid_unit(u)?(DWORD)*(WORD*)(u+0x64):0xffffffffu;
     if(stage5_producer_selection!=SCAPI_State.selection_generation ||
-       stage5_producer_epoch!=SCAPI_State.epoch) {
+       stage5_producer_epoch!=SCAPI_State.epoch ||
+       stage5_producer_unit_type!=producer_type) {
+        /* Same pointer, same GUI selection generation, different unit type is
+           a real producer change: never carry the old confirmation across it. */
         stage5_producer_confirmed=0;
         stage5_producer_selection=SCAPI_State.selection_generation;
         stage5_producer_epoch=SCAPI_State.epoch;
+        stage5_producer_unit_type=producer_type;
     }
     for(i=0;i<9;++i)if(fresh[i].slot) {
         ++count;
@@ -437,6 +444,10 @@ static DWORD stage5_request(void) {
         ScapiCargo *cargo;BYTE *passenger,*node;
         if(stage5_mode())return SC_PENDING_TARGET;
         if(SCAPI_State.expected_cargo_serial!=SCAPI_State.cargo_serial)return SC_CARGO_CHANGED;
+        /* A transient native redraw hides the live cargo rows but preserves
+           their identity ticket. Report unavailability before validating the
+           now-empty slot so a valid ticket is not misreported as bad input. */
+        if(U8(0x68c9dc))return SC_COMMAND_UNAVAILABLE;
         if(SCAPI_State.cargo_slot>=SCAPI_State.cargo_count || SCAPI_State.cargo_slot>=8)return SC_BAD_ARGUMENT;
         cargo=&stage5_cargo[SCAPI_State.cargo_slot];passenger=(BYTE*)(uintptr_t)cargo->unit;
         node=(BYTE*)(uintptr_t)cargo->node;

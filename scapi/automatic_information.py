@@ -5,10 +5,13 @@ connection is shared with the stdin reader or model transport.
 """
 import json
 import hashlib
+import inspect
+import math
 import time
 import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
+from .terrain_reference import build_screen_terrain
 
 
 INFORMATION_OPS = frozenset(('observe_view', 'terrain_view', 'own_units',
@@ -24,6 +27,24 @@ INFORMATION_OPS = frozenset(('observe_view', 'terrain_view', 'own_units',
 PAGE_ROWS = 64
 TEXT_BYTES = 65536
 UNIT_CAPACITY = 1700
+SELECTION_ACTIONS = frozenset(('select_at','select_box','select_same_type','select_group'))
+COMPASS_8 = ('E','SE','S','SW','W','NW','N','NE')
+# Coarse derived-stationary buckets. A stationary unit therefore contributes at
+# most seven sparse row patches over ten minutes, never a patch every scan.
+STATIONARY_BUCKETS_S = (15, 30, 60, 120, 180, 300, 600)
+
+
+def _stationary_bucket_s(ms):
+    """Largest coarse bucket not above the observed duration, or None."""
+    if type(ms) is not int or ms < 15000:
+        return None
+    seconds = ms // 1000
+    bucket = None
+    for candidate in STATIONARY_BUCKETS_S:
+        if candidate > seconds:
+            break
+        bucket = candidate
+    return bucket
 
 
 def _json(value):
@@ -299,6 +320,38 @@ class DeliveryOutbox:
         return self.db.execute('SELECT 1 FROM automatic_delivery_v1 WHERE profile=? AND processed=0 LIMIT 1',
                                (self.profile,)).fetchone() is not None
 
+    @staticmethod
+    def _is_learning_only_message(message):
+        if not isinstance(message, dict) or message.get('type') != 'information':
+            return False
+        records = message.get('records')
+        if not isinstance(records, list) or not records:
+            return False
+        for record in records:
+            if not isinstance(record, dict):
+                return False
+            source = record.get('source')
+            if source in ('knowledge_updates', 'learned_observation', 'learning_status'):
+                continue
+            if source == 'selected_panel' and record.get('update') == 'append':
+                continue
+            return False
+        return True
+
+    def has_pending_non_learning(self):
+        """True when a non-learning batch (startup/tips/world scan) awaits ack."""
+        rows = self.db.execute('SELECT message FROM automatic_delivery_v1 '
+                               'WHERE profile=? AND processed=0 ORDER BY id',
+                               (self.profile,))
+        for (raw,) in rows:
+            try:
+                message = json.loads(raw)
+            except (TypeError, ValueError):
+                return True
+            if not self._is_learning_only_message(message):
+                return True
+        return False
+
     def high_water(self):
         return self.db.execute('SELECT coalesce(max(id),0) FROM automatic_delivery_v1 WHERE profile=?',
                                (self.profile,)).fetchone()[0]
@@ -384,18 +437,41 @@ class AutomaticInformation:
         self.seen_selectors = set()
         self.next_due = 0.0
         self.period = 0.5  # replaced by the actual native basic-view wait
+        self.calm_period = 0.0  # >0 enables calm-vs-combat continuous scan pacing
+        self.combat_hold_seconds = 10.0
+        self._combat_until = 0.0
+        self._next_continuous_due = 0.0
         self.pending_target = None
         self.target_mode = None
         self.known_names = {}
         self.name_refresh = {}
         self.last_control = None
+        self.control_unavailable = False
         self.last_view = None
         self.last_view_scope = None
         self.last_view_identity = None
         self.last_view_availability_keys = set()
+        self.screen_terrain_scope = None
+        self.last_grid_sig = None
+        self.last_creep_sig = None
+        self.last_creep_tick_ms = None
+        self.screen_terrain_same_origin_interval_s = 2.0
+        self.screen_terrain_diff_cells_threshold = 96
+        self.last_screen_origin = None
+        self.last_screen_rows = None
+        self.last_screen_overlay_sig = None
+        self.last_screen_emit_tick_ms = None
+        self.last_screen_emit_mono = None
+        self._remembered_buildings_seen = {}
+        self._remembered_buildings_scope = None
+        self._building_memory_status_key_value = None
         self.last_own = None
         self.last_own_scope = None
         self.last_own_identity = None
+        self._own_stationary_track = {}
+        self._own_stationary_last_tick_ms = None
+        self._own_stationary_scope = None
+        self._last_menu_status = None
         self.last_resources = None
         self.last_resources_scope = None
         self.last_resources_identity = None
@@ -406,21 +482,203 @@ class AutomaticInformation:
         self._scan_advances = None
         self.feedback_cache = {}
         self.feedback_revision = 0
+        self._enemy_frame = {}
+        self._enemy_frame_scope = None
         self.last_step = None
         self.last_preview = None
         self._completion_stream = uuid.uuid4().hex
         if outbox is not None:
             outbox.reference_knowledge=getattr(getattr(runtime,'api',None),'_knowledge',None)
 
-    def configure(self, snapshot):
+    DISCRETE_THREAT_EVENTS = frozenset((
+        'own_under_attack', 'enemy_in_view', 'offscreen_enemy_contact',
+        'nuclear_launch_warning', 'nuclear_marker_seen', 'minimap_ping',
+    ))
+
+    def configure(self, snapshot, *, calm_interval_ms=None, combat_hold_seconds=10.0,
+                  screen_terrain_same_origin_interval_s=None,
+                  screen_terrain_diff_cells_threshold=None):
         value = snapshot['view_wait_ms']
         if type(value) is not int or value <= 0:
             raise ValueError('native automatic observation interval unavailable')
         self.period = value / 1000
+        if calm_interval_ms is not None:
+            if type(calm_interval_ms) is not int or calm_interval_ms < 0:
+                raise ValueError('calm_interval_ms must be a nonnegative integer')
+            self.calm_period = max(self.period, calm_interval_ms / 1000) if calm_interval_ms > 0 else 0.0
+        if isinstance(combat_hold_seconds, bool) or not isinstance(combat_hold_seconds, (int, float)) or combat_hold_seconds < 0:
+            raise ValueError('combat_hold_seconds must be a nonnegative number')
+        self.combat_hold_seconds = float(combat_hold_seconds)
+        if screen_terrain_same_origin_interval_s is not None:
+            if (isinstance(screen_terrain_same_origin_interval_s, bool)
+                    or not isinstance(screen_terrain_same_origin_interval_s, (int, float))
+                    or screen_terrain_same_origin_interval_s < 0):
+                raise ValueError('screen_terrain_same_origin_interval_s must be a nonnegative number')
+            self.screen_terrain_same_origin_interval_s = float(screen_terrain_same_origin_interval_s)
+        if screen_terrain_diff_cells_threshold is not None:
+            if (type(screen_terrain_diff_cells_threshold) is not int
+                    or screen_terrain_diff_cells_threshold < 0):
+                raise ValueError('screen_terrain_diff_cells_threshold must be a nonnegative integer')
+            self.screen_terrain_diff_cells_threshold = screen_terrain_diff_cells_threshold
+
+    def mark_action_completed(self):
+        """Force fresh continuous state on the next scan after an action/wait."""
+        self._next_continuous_due = 0.0
+
+    @staticmethod
+    def _has_visible_enemy(view):
+        if not isinstance(view, dict) or view.get('status') != 'observed':
+            return False
+        units = view.get('units')
+        rows = units.values() if isinstance(units, dict) else units if isinstance(units, list) else ()
+        return any(isinstance(row, dict) and row.get('relation') == 'enemy' for row in rows)
+
+    @staticmethod
+    def _accepts_keyword(method, name):
+        try:
+            parameters = inspect.signature(method).parameters.values()
+        except (TypeError, ValueError):
+            return False
+        return any(parameter.name == name or parameter.kind == inspect.Parameter.VAR_KEYWORD
+                   for parameter in parameters)
+
+    @staticmethod
+    def _selection_requested(request, result):
+        if not isinstance(request, dict) or not isinstance(result, dict):
+            return False
+        ticket = result.get('selection')
+        if (not isinstance(ticket, dict) or type(ticket.get('count')) is not int
+                or ticket['count'] < 1):
+            return False
+        op = request.get('op')
+        if op in SELECTION_ACTIONS:
+            return True
+        if op == 'action_chain':
+            args = request.get('args')
+            steps = args.get('steps') if isinstance(args, dict) else None
+            return isinstance(steps, list) and any(
+                isinstance(step, dict) and step.get('op') in SELECTION_ACTIONS for step in steps)
+        return False
+
+    def _selection_feedback(self, ticket):
+        """Enrich a live selection ticket through the real Stage5 value path.
+
+        The ticket came from the action itself, so the full current_selection
+        probe is only a fallback. Any unusable enrichment stays fail-closed:
+        the lawful ticket remains, but no member/value is invented.
+        """
+        api = getattr(self.runtime, 'api', None)
+        for name in ('selected_members_for_ticket', 'current_selection'):
+            method = getattr(api, name, None)
+            if not callable(method):
+                continue
+            kwargs = {}
+            if self._accepts_keyword(method, 'reuse_own_snapshot'):
+                kwargs['reuse_own_snapshot'] = True
+            try:
+                result = (method(deepcopy(ticket), **kwargs) if name == 'selected_members_for_ticket'
+                          else method(**kwargs))
+            except (TypeError, ValueError, KeyError, AttributeError, RuntimeError):
+                continue
+            if not isinstance(result, dict):
+                continue
+            if result.get('status') == 'outcome_unknown':
+                return result
+            if isinstance(result.get('selection'), dict):
+                return result
+        return {'selection':deepcopy(ticket)}
+
+    @staticmethod
+    def _build_sites_active(card, target_mode):
+        """Build sites are lawful only in an open build menu or placement/Land mode."""
+        if target_mode == 'placing':
+            return True
+        return (isinstance(card, dict) and card.get('status') == 'observed'
+                and (card.get('mode') == 'placing' or card.get('build_submenu') is True))
+
+    @staticmethod
+    def _compass(dx, dy):
+        angle = math.degrees(math.atan2(dy, dx))
+        return COMPASS_8[int((angle + 22.5) // 45) % 8]
+
+    def _attach_enemy_motion(self, view):
+        """Pure two-frame enemy motion; no engine velocity or fog extrapolation."""
+        api = getattr(self.runtime, 'api', None)
+        scope = (getattr(self.runtime, 'run_ref', None), getattr(api, '_pid', None),
+                 getattr(api, '_creation', None), getattr(api, '_epoch', None))
+        if scope != self._enemy_frame_scope:
+            self._enemy_frame_scope = scope
+            self._enemy_frame = {}
+        live = (isinstance(view, dict) and view.get('status') == 'observed'
+                and view.get('temporal') != 'last_observed_not_current'
+                and view.get('session_changed') is not True and view.get('active') is not False)
+        tick = view.get('observed_tick_ms') if isinstance(view, dict) else None
+        if not live or type(tick) is not int:
+            self._enemy_frame = {}
+            return view
+        units = view.get('units')
+        rows = units.values() if isinstance(units, dict) else units if isinstance(units, list) else ()
+        previous = self._enemy_frame
+        current = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            # Only this frame's derivation may publish motion. A stationary
+            # row or a non-enemy row therefore never carries a stale vector.
+            row.pop('motion', None)
+            if row.get('relation') != 'enemy':
+                continue
+            token = row.get('entity_token')
+            position = row.get('position')
+            if (not isinstance(token, str) or not token or token in current
+                    or not isinstance(position, dict)
+                    or type(position.get('x')) is not int
+                    or type(position.get('y')) is not int):
+                continue
+            x, y = position['x'], position['y']
+            prior = previous.get(token)
+            if prior is not None:
+                px, py, prior_tick = prior
+                dt_ms = tick - prior_tick
+                dx, dy = x - px, y - py
+                if dt_ms > 0 and (dx or dy):
+                    row['motion'] = {'dx':dx, 'dy':dy, 'dt_ms':dt_ms,
+                                     'dir':self._compass(dx, dy)}
+            current[token] = (x, y, tick)
+        self._enemy_frame = current
+        return view
+
+    @staticmethod
+    def _role_experiences(rt):
+        stores = getattr(rt, 'role_experiences', None)
+        return stores if isinstance(stores, dict) and stores else {}
 
     def remember_authoring(self, result):
-        if result.get('entry_id'):
+        if isinstance(result, dict) and result.get('entry_id'):
             self.selectors.append(({'entry_id': result['entry_id']}, None))
+
+    def remember_experience(self, result, role=None):
+        """Queue one authored entry page for the role that actually wrote it."""
+        if (not isinstance(result, dict) or not result.get('entry_id')
+                or result.get('written') is not True):
+            return
+        stores = self._role_experiences(self.runtime)
+        selector = {'entry_id': result['entry_id']}
+        if role is not None and stores and role in stores:
+            self.selectors.append((selector, None, role))
+        else:
+            # Standalone single-store sessions keep their existing selector and
+            # automatic delivery behavior.
+            self.selectors.append((selector, None))
+
+    def _queue_keyword_selector(self, name):
+        """Queue observed public names for the configured role notebooks."""
+        stores = self._role_experiences(self.runtime)
+        if stores:
+            for role in sorted(stores):
+                self.selectors.append(({'keyword': name}, None, role))
+        else:
+            self.selectors.append(({'keyword': name}, None))
 
     def remember_target(self, result):
         if result.get('status') == 'target_required':
@@ -539,20 +797,191 @@ class AutomaticInformation:
             if remaining and remaining[0]['identity']==first['identity']:
                 raise RuntimeError('reference notice publisher did not complete durable handoff')
 
+    @staticmethod
+    def _transient_busy(result):
+        return (isinstance(result, dict) and result.get('status') == 'rejected'
+                and result.get('reason') == 'busy')
+
+    def _record_control(self, records, control):
+        """Retain the last good control facts across a transient busy probe."""
+        if self._transient_busy(control):
+            # A busy mailbox says nothing about control ownership. Keep the prior
+            # state for evidence and mark control unavailable. The player-session
+            # objectives guard must OR this flag into its early return.
+            self.control_unavailable = True
+            return
+        self.control_unavailable = False
+        self.last_control = control
+        if self._control_paused(control):
+            self._own_stationary_last_tick_ms = None
+        self._record(records, 'state', control)
+
     def _call(self, method, **args):
         result = method(**args)
         if result.get('status') == 'outcome_unknown':
             raise RuntimeError('automatic observation outcome unknown; no mailbox retry')
         return result
 
+    @staticmethod
+    def _screen_sample_available(terrain):
+        """Only a real scoped terrain attachment can drive the screen source.
+
+        Older synthetic/legacy payloads may still carry a generic `cells` list
+        for unrelated projection tests; they have neither a terrain epoch nor
+        the decoder's explicit exploration field and must emit nothing.
+        """
+        cells=terrain.get('cells')
+        if not isinstance(cells,list):return False
+        if type(terrain.get('epoch')) is int:return True
+        if isinstance(terrain.get('camera'),dict):return True
+        fields=('explored','currently_visible','tile_summary_status')
+        return any(isinstance(cell,dict) and any(key in cell for key in fields)
+                   for cell in cells)
+
+    @staticmethod
+    def _screen_grid_signature(screen):
+        return _json({'origin':screen.get('origin'),'rows':screen.get('rows'),
+                      'ramps':screen.get('ramps',[]),'no_build':screen.get('no_build',[]),
+                      'blocks_view':screen.get('blocks_view',[])})
+
+    @staticmethod
+    def _screen_creep_signature(screen):
+        return _json({'creep_current':screen.get('creep_current',[]),
+                      'creep_fog':screen.get('creep_fog',[])})
+
+    @staticmethod
+    def _screen_overlay_signature(screen):
+        return _json({'ramps':screen.get('ramps',[]),
+                      'no_build':screen.get('no_build',[]),
+                      'blocks_view':screen.get('blocks_view',[])})
+
+    @staticmethod
+    def _screen_row_changes(old_rows,new_rows):
+        """Count differing characters; flag anything that is not pure fog reveal."""
+        if not isinstance(old_rows,list) or not isinstance(new_rows,list):
+            return None
+        if len(old_rows)!=len(new_rows):
+            return None
+        changed=0;authoritative=False
+        for old,new in zip(old_rows,new_rows):
+            if not isinstance(old,str) or not isinstance(new,str) or len(old)!=len(new):
+                return None
+            for old_ch,new_ch in zip(old,new):
+                if old_ch==new_ch:continue
+                changed+=1
+                if old_ch!='?' or new_ch=='?':authoritative=True
+        return changed,authoritative
+
+    def _reset_screen_emission(self):
+        self.last_screen_origin=None
+        self.last_screen_rows=None
+        self.last_screen_overlay_sig=None
+        self.last_screen_emit_tick_ms=None
+        self.last_screen_emit_mono=None
+
+    def _record_screen_terrain(self,records,terrain,store,scope):
+        """Emit a compact screen map on change; fog-only reveals are throttled.
+
+        The grid signature intentionally excludes the sample clock and camera,
+        so a stationary unchanged screen contributes zero bytes. A changed
+        map (including a door toggling under the same camera) replaces the
+        screen immediately. Same-origin pure fog reveals smaller than the
+        configured threshold accumulate until the interval elapses, and a
+        suppressed sample never advances the emitted baseline. Remembered
+        creep spread is a small delta and at most one such delta per 2000ms of
+        observed game time.
+        """
+        screen=build_screen_terrain(terrain,store=store)
+        if screen is None:return
+        if self.screen_terrain_scope!=scope:
+            self.screen_terrain_scope=scope
+            self.last_grid_sig=None
+            self.last_creep_sig=None
+            self.last_creep_tick_ms=None
+            self._reset_screen_emission()
+        grid_sig=self._screen_grid_signature(screen)
+        creep_sig=self._screen_creep_signature(screen)
+        tick=screen.get('observed_tick_ms')
+        if type(tick) is not int:tick=None
+        origin=screen.get('origin')
+        rows=screen.get('rows')
+        overlay_sig=self._screen_overlay_signature(screen)
+        if grid_sig!=self.last_grid_sig:
+            emit=True
+            if self.last_grid_sig is not None and origin==self.last_screen_origin:
+                changes=self._screen_row_changes(self.last_screen_rows,rows)
+                if overlay_sig==self.last_screen_overlay_sig and changes is not None:
+                    changed_cells,authoritative=changes
+                    emit=(authoritative or changed_cells
+                          >=self.screen_terrain_diff_cells_threshold)
+                    if not emit:
+                        previous_tick=self.last_screen_emit_tick_ms
+                        previous_mono=self.last_screen_emit_mono
+                        if type(tick) is int and type(previous_tick) is int:
+                            interval_ms=self.screen_terrain_same_origin_interval_s*1000
+                            emit=(tick<previous_tick
+                                  or tick-previous_tick>=interval_ms)
+                        elif previous_mono is None:
+                            emit=True
+                        else:
+                            emit=(time.monotonic()-previous_mono
+                                  >=self.screen_terrain_same_origin_interval_s)
+                if not emit:
+                    # Do not advance the emitted signatures: later fog reveals
+                    # must accumulate against the last screen actually sent.
+                    return
+            records.append({'source':'screen_terrain','update':'replace','result':screen})
+            self.last_grid_sig=grid_sig
+            self.last_creep_sig=creep_sig
+            self.last_creep_tick_ms=tick
+            self.last_screen_origin=deepcopy(origin)
+            self.last_screen_rows=deepcopy(rows) if isinstance(rows,list) else rows
+            self.last_screen_overlay_sig=overlay_sig
+            self.last_screen_emit_tick_ms=tick
+            self.last_screen_emit_mono=time.monotonic()
+            return
+        if creep_sig!=self.last_creep_sig:
+            previous_tick=self.last_creep_tick_ms
+            if (previous_tick is None or tick is None or tick<previous_tick
+                    or tick-previous_tick>=2000):
+                records.append({'source':'screen_terrain_creep','update':'replace',
+                    'result':{'camera':deepcopy(screen.get('camera')),
+                              'observed_tick_ms':tick,
+                              'creep_current':deepcopy(screen.get('creep_current',[])),
+                              'creep_fog':deepcopy(screen.get('creep_fog',[]))}})
+                self.last_creep_sig=creep_sig
+                self.last_creep_tick_ms=tick
+
     def _record(self, records, source, result, *, append=False, key=None, update=None):
         if result.get('status') == 'outcome_unknown':
             raise RuntimeError('automatic observation outcome unknown; no mailbox retry')
+        if source == 'building_memory_status' and isinstance(result, dict):
+            status_key = self._building_memory_status_key(result)
+            if status_key == self._building_memory_status_key_value:
+                return
+            self._building_memory_status_key_value = status_key
+        if source=='observe_view' and not append:
+            result=self._attach_enemy_motion(result)
         if source=='resource_sites':
             self._record_resource_sites(records,result)
             return
+        learned_group_card = None
+        if source == 'command_card':
+            # Stage5 exposes this one-shot side channel; a callable consumer
+            # keeps command_card's public return schema unchanged. Also accept
+            # and remove a legacy private key rather than ever forwarding it.
+            legacy = result.pop('_learned_group_card', None) if isinstance(result, dict) else None
+            api = getattr(self.runtime,'api',None)
+            consume = getattr(api,'consume_learned_group_card',None)
+            if callable(consume):
+                learned_group_card = consume()
+            if learned_group_card is None:
+                learned_group_card = legacy
+            if result.get('status') != 'observed':
+                learned_group_card = None
         before_projection = len(records)
-        clean = self._reference_projection(records,source,public_page(result))
+        clean = self._reference_projection(records,source,public_page(result),
+                                           learned_group_card=learned_group_card)
         completion = self._completion_signature(source,result) if append else None
         knowledge_changed = any(row.get('source') == 'knowledge_updates' for row in records[before_projection:])
         if source=='observe_view':
@@ -565,17 +994,37 @@ class AutomaticInformation:
                          'epoch':getattr(api,'_epoch',None)}
                 notice=store.observe(terrain,observed_session=session,expected_session=session)
                 if notice.get('status')=='available':records.append({'source':'terrain_updates','update':'append','result':notice})
+                accepted=(isinstance(notice,dict)
+                          and notice.get('status') in ('available','unchanged'))
+                rejected=isinstance(notice,dict) and notice.get('status')=='rejected'
+                if (not append and not rejected and terrain.get('cells')
+                        and (accepted or self._screen_sample_available(terrain))):
+                    scope=(getattr(self.runtime,'run_ref',None),getattr(api,'_pid',None),
+                           getattr(api,'_creation',None),getattr(api,'_epoch',None))
+                    self._record_screen_terrain(records,terrain,store,scope)
             clean=project_automatic_view(clean)
+        if source=='observe_view' and not append:
+            self._project_own_stationary('observe_view',clean)
         if source=='own_units' and not append:
+            self._track_own_stationary(clean)
+            self._project_own_stationary('own_units',clean)
             self._record_owned_roster(records,clean)
             rows=clean.get('units',[])
             for row in rows if isinstance(rows,list) else rows.values():
                 name=row.get('name')
                 if isinstance(name,str) and name and name not in self.seen_selectors:
-                    self.seen_selectors.add(name);self.selectors.append(({'keyword':name},None))
+                    self.seen_selectors.add(name);self._queue_keyword_selector(name)
             return
         self._cache_feedback(source, clean)
-        if source=='session':self.last_session=deepcopy(clean)
+        if source=='menu_status' and isinstance(clean,dict):
+            self._last_menu_status=deepcopy(clean)
+            if self._control_paused(clean):
+                self._own_stationary_last_tick_ms=None
+        if source=='session':
+            self.last_session=deepcopy(clean)
+            self._note_own_stationary_scope()
+            if clean.get('session_changed') is True:
+                self._reset_own_stationary()
         if source == 'observe_view' and not append:
             # Validate all JSON values, including unchanged ones, without
             # retaining a second serialized copy of the complete terrain.
@@ -587,9 +1036,19 @@ class AutomaticInformation:
             identity=self._view_identity()
             availability_keys=set()
             if self._retain_view_history(clean,scope,identity):
+                # A retained historical view is a blind snapshot: no new frame
+                # was observed, so a later roster read must not age stationary
+                # time across this gap.
+                self._own_stationary_last_tick_ms=None
                 history=deepcopy(self.last_view)
                 for name in self.last_view_availability_keys:
                     history.pop(name,None)
+                # A retained historical observation is not two consecutive live
+                # frames; never republish a previous derived motion vector.
+                rows=history.get('units')
+                for row in (rows.values() if isinstance(rows,dict) else
+                            rows if isinstance(rows,list) else ()):
+                    if isinstance(row,dict):row.pop('motion',None)
                 # These clocks and payload fields describe the old observation,
                 # never the time/status of this unsuccessful read.
                 observation_fields={'units','terrain','observed_tick_ms','observed_frame','received_monotonic_ns','last_seen_tick_ms'}
@@ -634,7 +1093,7 @@ class AutomaticInformation:
                 name = row.get('name')
                 if isinstance(name, str) and name and name not in self.seen_selectors:
                     self.seen_selectors.add(name)
-                    self.selectors.append(({'keyword': name}, None))
+                    self._queue_keyword_selector(name)
 
     def _completion_signature(self, source, result):
         if (source != 'selected_panel' or result.get('status') != 'observed'
@@ -655,8 +1114,29 @@ class AutomaticInformation:
             return None
         # Only observation-envelope clocks/IDs are irrelevant. Nested source
         # facts, selection, owner and rules remain part of exact equality.
+        # Dynamic command-card toggles (enabled state or subset appearances of
+        # already-accumulated basic_commands/skills) use post-merge static facts
+        # so oscillating worker/transport/siege/building buttons do not defeat
+        # unchanged-completion suppression.
         semantic = {key:value for key,value in result.items() if key not in
                     ('observation_id','observed_tick_ms','observed_frame','received_monotonic_ns','last_seen_tick_ms')}
+        if isinstance(semantic.get('panel'), dict):
+            from .panel_knowledge import PanelKnowledge
+            panel = deepcopy(semantic['panel'])
+            knowledge = getattr(api, '_knowledge', None)
+            token = panel.get('type_token') or ('name:' + panel['name'] if panel.get('name') else None)
+            stored_facts = (knowledge.reference_facts(token, 'selected_panel', owner_token=panel.get('owner_token'))
+                            if knowledge is not None and token and hasattr(knowledge, 'reference_facts') else None)
+            card_available = panel.get('card_status') != 'unavailable'
+            for field in ('basic_commands', 'skills'):
+                if field in panel:
+                    if isinstance(stored_facts, dict) and field in stored_facts:
+                        panel[field] = stored_facts[field]
+                    else:
+                        panel[field] = PanelKnowledge._merge_card_items(None, panel[field])
+                elif card_available and isinstance(stored_facts, dict) and field in stored_facts:
+                    panel[field] = stored_facts[field]
+            semantic['panel'] = panel
         return _json({'stream':self._completion_stream,'run_ref':getattr(self.runtime,'run_ref',None),
                       'knowledge_scope':getattr(getattr(api,'_knowledge',None),'scope',None),
                       'result':semantic})
@@ -747,11 +1227,189 @@ class AutomaticInformation:
         return {'status':'observed','scope':'selected_resource_ui','observed_tick_ms':sample['observed_tick_ms'],
                 'sites':sites}
 
+    def _reset_own_stationary(self):
+        self._own_stationary_track = {}
+        self._own_stationary_last_tick_ms = None
+
+    def _own_stationary_current_scope(self):
+        api = getattr(self.runtime, 'api', None)
+        return (getattr(self.runtime, 'run_ref', None),
+                getattr(api, '_pid', None), getattr(api, '_creation', None),
+                getattr(api, '_epoch', None),
+                getattr(getattr(api, '_knowledge', None), 'scope', None))
+
+    def _note_own_stationary_scope(self):
+        scope = self._own_stationary_current_scope()
+        if self._own_stationary_scope is not None and scope != self._own_stationary_scope:
+            self._reset_own_stationary()
+        self._own_stationary_scope = scope
+
+    @staticmethod
+    def _control_paused(value):
+        if not isinstance(value, dict):
+            return False
+        if value.get('paused') in (1, True) or value.get('menu_open') in (1, True):
+            return True
+        if value.get('pause') in (1, True):
+            return True
+        return value.get('control') == 'paused'
+
+    def _own_stationary_paused(self):
+        """Live human pause/menu state; a paused scan never ages durations."""
+        api = getattr(self.runtime, 'api', None)
+        peek = getattr(getattr(api, '_client', None), 'peek', None)
+        live = None
+        if callable(peek):
+            try:
+                live = peek()
+            except Exception:
+                live = None
+        if isinstance(live, dict) and self._control_paused(live):
+            return True
+        if self._control_paused(self.last_control):
+            return True
+        return self._control_paused(self._last_menu_status)
+
+    @staticmethod
+    def _stationary_rows(snapshot):
+        units = snapshot.get('units') if isinstance(snapshot, dict) else None
+        if isinstance(units, dict):
+            return units.values()
+        return units if isinstance(units, list) else ()
+
+    def _fallback_stationary_eligible(self, row, token):
+        """Fallback for stubs without Stage5's private row flags.
+
+        Stage5 only publishes `work` for the valid building work record, so its
+        mere presence marks a building even when both names are null.
+        """
+        if 'work' in row or 'supply_provided' in row:
+            return False
+        remembered = getattr(self, '_remembered_buildings_seen', None)
+        if isinstance(remembered, dict) and token in remembered:
+            return False
+        return True
+
+    def _track_own_stationary(self, snapshot):
+        """Age eligible mobile units from fresh, unpaused own snapshots only."""
+        if not isinstance(snapshot, dict) or snapshot.get('status') != 'observed':
+            # A blocked/changed/failed roster is a blind gap: it supplies no
+            # continuous observation, so the next fresh frame must start a new
+            # clock reference instead of aging the duration across that gap.
+            self._own_stationary_last_tick_ms = None
+            return
+        if snapshot.get('temporal') == 'last_observed_not_current':
+            self._own_stationary_last_tick_ms = None
+            return
+        self._note_own_stationary_scope()
+        if snapshot.get('session_changed') is True:
+            self._reset_own_stationary()
+            return
+        if snapshot.get('reason') == 'paused' or self._own_stationary_paused():
+            # Keep coordinates/durations intact; only the clock reference is
+            # cleared so time spent in a human pause is never accumulated.
+            self._own_stationary_last_tick_ms = None
+            return
+        tick_ms = snapshot.get('observed_tick_ms')
+        if type(tick_ms) is not int:
+            self._own_stationary_last_tick_ms = None
+            return
+        api = getattr(self.runtime, 'api', None)
+        eligibility = getattr(api, 'last_own_unit_eligibility', None)
+        current = {}
+        for row in self._stationary_rows(snapshot):
+            if not isinstance(row, dict):
+                continue
+            token = row.get('entity_token')
+            position = row.get('position')
+            if (not isinstance(token, str) or not token
+                    or not isinstance(position, dict)
+                    or type(position.get('x')) is not int
+                    or type(position.get('y')) is not int):
+                continue
+            if isinstance(eligibility, dict):
+                if eligibility.get(token) is not True:
+                    continue
+            elif eligibility is None:
+                if not self._fallback_stationary_eligible(row, token):
+                    continue
+            else:
+                continue
+            current[token] = (position['x'], position['y'])
+        previous_tick = self._own_stationary_last_tick_ms
+        track = {}
+        for token, (x, y) in current.items():
+            previous = self._own_stationary_track.get(token)
+            if (previous is None or previous.get('x') != x
+                    or previous.get('y') != y):
+                track[token] = {'x':x, 'y':y, 'stationary_ms':0}
+                continue
+            stationary_ms = previous.get('stationary_ms')
+            if type(stationary_ms) is not int:
+                stationary_ms = 0
+            if previous_tick is not None and tick_ms > previous_tick:
+                stationary_ms += tick_ms - previous_tick
+            track[token] = {'x':x, 'y':y, 'stationary_ms':stationary_ms}
+        # Disappearing, invalid or newly ineligible entities (loaded into a
+        # Bunker/hangar, dead, out of the roster) start fresh when they return.
+        self._own_stationary_track = track
+        self._own_stationary_last_tick_ms = tick_ms
+
+    def _project_own_stationary(self, source, snapshot):
+        """Attach the sparse bucket to own rows; moving removes it again."""
+        if source not in ('own_units', 'observe_view'):
+            return
+        if not isinstance(snapshot, dict) or snapshot.get('status') != 'observed':
+            return
+        if snapshot.get('temporal') == 'last_observed_not_current':
+            return
+        self._note_own_stationary_scope()
+        if snapshot.get('session_changed') is True:
+            self._reset_own_stationary()
+            return
+        for row in self._stationary_rows(snapshot):
+            if not isinstance(row, dict):
+                continue
+            if source == 'observe_view' and row.get('relation') != 'own':
+                row.pop('stationary_s', None)
+                continue
+            token = row.get('entity_token')
+            entry = (self._own_stationary_track.get(token)
+                     if isinstance(token, str) and token else None)
+            if isinstance(entry, dict):
+                # The visible frame may be a moment newer than the roster scan;
+                # a different current position proves movement, so never carry
+                # a stale stationary bucket across that race. A paused roster
+                # likewise must not keep a bucket on a changed/absent position.
+                position = row.get('position')
+                positioned = (isinstance(position, dict)
+                              and type(position.get('x')) is int
+                              and type(position.get('y')) is int)
+                if source == 'own_units' and not positioned:
+                    entry = None
+                elif (positioned and (entry.get('x') != position['x']
+                                      or entry.get('y') != position['y'])):
+                    entry = None
+            bucket = (_stationary_bucket_s(entry.get('stationary_ms'))
+                      if isinstance(entry, dict) else None)
+            if bucket is None:
+                row.pop('stationary_s', None)
+            else:
+                row['stationary_s'] = bucket
+
     def _record_owned_roster(self,records,clean):
         api=getattr(self.runtime,'api',None)
         scope=(getattr(self.runtime,'run_ref',None),getattr(api,'_pid',None),
                getattr(api,'_creation',None),getattr(api,'_epoch',None))
         identity=self._view_identity()
+        self._note_own_stationary_scope()
+        if isinstance(clean,dict) and clean.get('session_changed') is True:
+            self._reset_own_stationary()
+        if (self._own_stationary_paused()
+                or (isinstance(clean,dict) and clean.get('reason')=='paused')):
+            # A paused read (successful or retained) must never leave a clock
+            # reference that later spans the pause.
+            self._own_stationary_last_tick_ms=None
         snapshot=deepcopy(clean)
         if clean.get('status')=='observed':
             units=clean.get('units')
@@ -770,6 +1428,7 @@ class AutomaticInformation:
                             membership_semantics='current_owned_roster; removal_does_not_prove_death')
         elif self.last_own is not None and self._retain_view_history(clean,scope,identity,baseline=self.last_own,
                 baseline_scope=self.last_own_scope,baseline_identity=self.last_own_identity):
+            self._own_stationary_last_tick_ms=None
             snapshot=deepcopy(self.last_own)
             for name in ('reason','required_units','required_bytes','required_bytes_at_least'):
                 snapshot.pop(name,None)
@@ -838,7 +1497,7 @@ class AutomaticInformation:
             try:record_private({'automatic_view_patch':evidence})
             except Exception:pass
 
-    def _reference_projection(self,records,source,result):
+    def _reference_projection(self,records,source,result,learned_group_card=None):
         knowledge=getattr(getattr(self.runtime,'api',None),'_knowledge',None)
         remember=getattr(knowledge,'remember_public_reference',None)
         if not callable(remember):return result
@@ -852,14 +1511,25 @@ class AutomaticInformation:
             applicable=applicable and all(selected.get(key)==value for key,value in identity.items())
         elif result.get('temporal')=='completed_observation':
             applicable=False
-        static=('details','weapons','basic_commands','skills','build_options','build_options_status','supply_provided','fully_known')
+        static=('details','weapons','basic_commands','skills','build_options','build_options_status','supply_provided','fully_known','detector')
         notices=[]
         durable=(self.outbox is not None and callable(getattr(knowledge,'pending_reference_notices',None)))
         if durable:self.outbox.reference_knowledge=knowledge
         def project(row):
             if not isinstance(row,dict):return row
             facts={key:deepcopy(row[key]) for key in static if key in row}
+            if row.get('detector') is not True or source!='selected_panel':
+                # Static detector knowledge is only ever a positive single-panel
+                # observation; unknown stays omitted and roster/view rows never
+                # persist it.
+                facts.pop('detector',None)
             dynamic={key:deepcopy(value) for key,value in row.items() if key not in static}
+            if 'fully_known' in row:
+                # The static marker is retained in public_reference_v1 above, but
+                # a current panel answer must also say whether it is confirmed.
+                dynamic['fully_known']=deepcopy(row['fully_known'])
+            if source=='selected_panel' and row.get('detector') is True:
+                dynamic['detector']=True
             own=(row.get('owned') is True or row.get('relation')=='own' or source=='own_units' or
                  (source=='current_selection' and result.get('owned') is True))
             if row.get('owned') is False or row.get('relation') not in (None,'own'):own=False
@@ -874,11 +1544,36 @@ class AutomaticInformation:
             token=row.get('type_token') or ('name:'+row['name'] if row.get('name') else None)
             if token:
                 notice_args={'notice_run_ref':self.runtime.run_ref} if durable else {}
-                changed=(remember(token,source,facts,name=row.get('name'),owner_token=row.get('owner_token'),**notice_args)
+                changed=(remember(token,source,facts,name=row.get('name'),owner_token=row.get('owner_token'),
+                                  merge_static=True,**notice_args)
                          if applicable else None)
                 dynamic['knowledge_token']=token
+                if source=='own_units' and 'type_token' in dynamic:
+                    # The owned roster already carries an opaque entity token;
+                    # keep its lean wire schema and bind knowledge by knowledge_token.
+                    dynamic.pop('type_token')
                 if changed and not durable:notices.append(changed)
             return dynamic
+        if source=='command_card' and isinstance(learned_group_card,dict):
+            # A group card teaches visible labels for its shared type/owner, but
+            # not a single unit's complete skill signature. remember_public_reference
+            # deduplicates identical facts, so later scans cannot spam notices.
+            type_token=learned_group_card.get('type_token')
+            skills=learned_group_card.get('skills')
+            basics=learned_group_card.get('basic_commands')
+            if (isinstance(type_token,str) and type_token
+                    and ((isinstance(skills,list) and skills)
+                         or (isinstance(basics,list) and basics))):
+                facts={}
+                if isinstance(skills,list):facts['skills']=deepcopy(skills)
+                if isinstance(basics,list):facts['basic_commands']=deepcopy(basics)
+                if facts:
+                    notice_args={'notice_run_ref':self.runtime.run_ref} if durable else {}
+                    changed=remember(type_token,'group_command_card',facts,
+                        name=learned_group_card.get('name'),
+                        owner_token=learned_group_card.get('owner_token'),
+                        merge_static=True,**notice_args)
+                    if changed and not durable:notices.append(changed)
         clean=deepcopy(result)
         if source=='selected_panel' and isinstance(clean.get('panel'),dict):clean['panel']=project(clean['panel'])
         elif source in ('own_units','observe_view','current_selection'):
@@ -955,9 +1650,42 @@ class AutomaticInformation:
                           'over_budget':elapsed>334}
         return self.last_step
 
+    def pump_events_only(self):
+        """Drain new journal events without any gameplay observation or action.
+
+        Used only by a held session that must keep cutscene/transmission text
+        flowing. It shares the normal scan's durable event cursor, so a later
+        full scan never emits the same event twice. View, terrain, selection,
+        resources and every native action remain untouched.
+        """
+        rt = self.runtime
+        events = getattr(rt, 'events', None)
+        outbox = self.outbox
+        run_ref = getattr(rt, 'run_ref', None)
+        if events is None or outbox is None or not isinstance(run_ref, str):
+            return None
+        source = 'events:' + run_ref
+        page = self._call(events.read, limit=PAGE_ROWS, cursor=outbox.cursor(source))
+        records, advances = [], {}
+        self._record(records, 'events_head', {k: v for k, v in page.items()
+                                              if k not in ('events', 'next_cursor', 'has_more')})
+        new_events = page.get('events') or []
+        if new_events:
+            self._record(records, 'events', page, append=True)
+            advances[source] = page['next_cursor']
+            if any(isinstance(ev, dict) and ev.get('kind') in self.DISCRETE_THREAT_EVENTS
+                   for ev in new_events):
+                self._combat_until = max(self._combat_until,
+                                         time.monotonic() + self.combat_hold_seconds)
+        if records:
+            self.publish(records, advances=advances)
+        elif advances:
+            outbox.advance(advances)
+        return page
+
     @staticmethod
     def _dynamic_unit(row):
-        fields = ('appearance_token','type_token','owner_token','name','relation','position',
+        fields = ('appearance_token','type_token','owner_token','name','relation','rescuable','position',
                   'hp','shields','energy','armor_upgrade','ground_attack_upgrade','air_attack_upgrade',
                   'work','work_progress')
         result = {key:deepcopy(row[key]) for key in fields if key in row}
@@ -981,10 +1709,13 @@ class AutomaticInformation:
                 if key in result:value[key]=deepcopy(result[key])
         else:
             return
-        self.feedback_cache[source] = {'fresh':False,
+        cached={'fresh':False,
             'observed_at_utc':datetime.now(timezone.utc).isoformat(),'result':value}
+        if source in ('current_selection','command_card'):
+            cached['feedback_revision']=self.feedback_revision
+        self.feedback_cache[source] = cached
 
-    def action_feedback(self, request, result):
+    def action_feedback(self, request, result, *, enrich_selection=False):
         """Fresh next-action tickets, plus explicitly dated background state.
 
         No terrain or static unit properties are expanded. Each read has its
@@ -1006,17 +1737,38 @@ class AutomaticInformation:
             feedback.update(status='unavailable',selection=deepcopy(unavailable),command_card=deepcopy(unavailable))
             return feedback
         try:
+            res_method = getattr(rt.api, 'resources', None)
+            if callable(res_method):
+                try:
+                    fresh_res = res_method()
+                    if isinstance(fresh_res, dict) and fresh_res.get('status') == 'observed':
+                        self._cache_feedback('resources', fresh_res)
+                        feedback['resources'] = {
+                            'fresh': True,
+                            'observed_at_utc': datetime.now(timezone.utc).isoformat(),
+                            'result': deepcopy(fresh_res),
+                        }
+                except Exception:
+                    pass
             resource=self._selected_resource_feedback(request,result)
             if resource is not None:
                 feedback['resource_sites']={'fresh':True,'observed_at_utc':datetime.now(timezone.utc).isoformat(),
                                             'result':resource}
-            if isinstance(result.get('selection'),dict):
+            if self._selection_requested(request,result):
+                # The action already supplied the live ticket. Enrich it through
+                # Stage5's selected_own_values path without another base probe.
+                selection=self._selection_feedback(result['selection'])
+            elif isinstance(result.get('selection'),dict):
                 selection = {'selection':deepcopy(result['selection'])}
             else:
                 # The base ticket-only probe avoids Stage5.current_selection's
                 # separate all-own-entity scan on the action critical path.
                 from .actions import Actions
                 selection = Actions.current_selection(rt.api)
+                if (enrich_selection and isinstance(selection.get('selection'),dict)
+                        and type(selection['selection'].get('count')) is int
+                        and selection['selection']['count']>=1):
+                    selection=self._selection_feedback(selection['selection'])
             feedback['selection'] = {'fresh':True,'observed_at_utc':datetime.now(timezone.utc).isoformat(),
                                      'result':selection}
             if selection.get('status') == 'outcome_unknown':
@@ -1053,6 +1805,143 @@ class AutomaticInformation:
             feedback.setdefault('command_card',deepcopy(unavailable))
         return feedback
 
+    @staticmethod
+    def _remembered_building_signature(row):
+        return _json({'appearance_token':row.get('appearance_token'),
+                      'last_seen_position':row.get('last_seen_position'),
+                      'currently_observed':row.get('currently_observed'),
+                      'name':row.get('name')})
+
+    def _remembered_buildings_cache(self,api,memory_source):
+        scope=(getattr(self.runtime,'run_ref',None),memory_source,
+               getattr(api,'_pid',None),getattr(api,'_creation',None),
+               getattr(api,'_epoch',None))
+        if scope!=self._remembered_buildings_scope:
+            self._remembered_buildings_scope=scope
+            self._remembered_buildings_seen={}
+        return self._remembered_buildings_seen
+
+    def _filter_remembered_buildings(self,memory,memory_source,api):
+        """Drop rows whose only movement is their observation clock.
+
+        A repeated record token with an unchanged stable signature is not a new
+        fact. Rows without a stable token and non-observed pages fail open.
+        Suppressing every row never suppresses the cursor advance: the caller
+        applies that from the original page.
+        """
+        if (not isinstance(memory,dict) or memory.get('status')!='observed'
+                or not isinstance(memory.get('buildings'),list)):
+            return memory
+        seen=self._remembered_buildings_cache(api,memory_source)
+        kept=[]
+        for row in memory['buildings']:
+            token=row.get('record_token') if isinstance(row,dict) else None
+            if not isinstance(token,str) or not token:
+                kept.append(row)
+                continue
+            signature=self._remembered_building_signature(row)
+            if seen.get(token)!=signature:
+                kept.append(row)
+                seen[token]=signature
+        if len(kept)==len(memory['buildings']):return memory
+        filtered=dict(memory)
+        filtered['buildings']=kept
+        return filtered
+
+    def _remembered_buildings_update(self,memory,memory_source,memory_start,advances):
+        """Filter one changes page and advance its checkpoint independently."""
+        filtered=self._filter_remembered_buildings(
+            memory,memory_source,getattr(self.runtime,'api',None))
+        if (isinstance(memory,dict) and memory.get('status')=='observed'
+                and memory.get('checkpoint',memory_start)!=memory_start):
+            # The checkpoint advances even when every row in this page was an
+            # unchanged reobservation; otherwise the same page repeats forever.
+            advances[memory_source]=memory['checkpoint']
+        return filtered
+
+    @staticmethod
+    def _building_memory_status_key(status):
+        counters=('pending','persisted_next_sequence','ack_next_sequence','write_sequence')
+        stable={key:value for key,value in status.items() if key not in counters}
+        stable['has_pending']=bool(status.get('pending'))
+        return _json(stable)
+
+    def _drain_name_refresh(self, api, records, advances):
+        """Drain empty building-history name checks in one scan; emit at most one non-empty page."""
+        progressed = False
+        while self.name_refresh:
+            kind = next(iter(self.name_refresh))
+            name_key, after = self.name_refresh[kind]
+            named = text_read(api.remembered_building_kind, kind=kind, limit=PAGE_ROWS, after_sequence=after)
+            if named.get('buildings') or named.get('status') != 'observed':
+                self._record(records, 'remembered_buildings', named, append=True, update='upsert')
+            if named.get('status') == 'observed':
+                progressed = True
+                complete = not named.get('has_more')
+                advances[name_key] = {'after': named['checkpoint'], 'complete': complete}
+                if complete:
+                    del self.name_refresh[kind]
+                else:
+                    self.name_refresh[kind] = (name_key, named['checkpoint'])
+                if not named.get('buildings') and complete:
+                    continue
+            break
+        # A failed name read must not force the scan loop to retry immediately;
+        # retain the pending kind for the normal next-period backoff.
+        return bool(self.name_refresh) and progressed
+
+    def _drain_experience_selectors(self, rt, records):
+        """Drain local experience pages; never schedules a continuous world scan."""
+        role_stores = self._role_experiences(rt)
+        diagnosed = False
+        while self.selectors:
+            item = self.selectors.pop(0)
+            if len(item) == 3:
+                selector, cursor, role = item
+            else:
+                selector, cursor = item
+                role = None
+            if role is not None and role_stores:
+                store = role_stores.get(role)
+                if store is None:
+                    continue
+                exp = text_read(store.read, limit=PAGE_ROWS, cursor=cursor,
+                                author_role=role, **selector)
+                if isinstance(exp, dict):
+                    # Every entry already carries its role/scope; the page-level
+                    # marker lets role delivery keep other roles' claims separate.
+                    exp = dict(exp, author_role=role)
+            else:
+                store = getattr(rt, 'experience', None)
+                if store is None:
+                    continue
+                exp = text_read(store.read, limit=PAGE_ROWS, cursor=cursor, **selector)
+            if exp.get('status') != 'ok':
+                # Re-inserting the same cursor with has_more=True and an
+                # immediate next_due would busy-loop a corrupt/unavailable
+                # notebook at 100% CPU. Emit one diagnostic, advance past an
+                # explicit corrupt sequence, otherwise drop the selector.
+                if not diagnosed:
+                    self._record(records, 'experience', exp, append=True)
+                    diagnosed = True
+                corrupt = exp.get('corrupt_sequence')
+                if (type(corrupt) is int and corrupt >= 0
+                        and (cursor is None or corrupt > cursor)):
+                    self.selectors.insert(0, (selector, corrupt, role)
+                                          if role is not None else
+                                          (selector, corrupt))
+                continue
+            if exp.get('has_more'):
+                self.selectors.insert(0, (selector, exp['next_cursor'], role)
+                                      if role is not None else
+                                      (selector, exp['next_cursor']))
+            if exp.get('entries'):
+                self._record(records, 'experience', exp, append=True)
+                break
+            if exp.get('has_more'):
+                break
+        return bool(self.selectors)
+
     def _scan(self, *, force=False):
         now = time.monotonic()
         if not force and now < self.next_due:
@@ -1070,11 +1959,50 @@ class AutomaticInformation:
         api = rt.api
         self.flush_learning()
         yield 'learning'
-        self.last_control = self._call(api.control_state)
-        self._record(records, 'state', self.last_control)
+        before_discrete = len(records)
+        control = self._call(api.control_state)
+        self._record_control(records, control)
         yield 'state'
         self._record(records, 'session', self._call(api.session))
         yield 'session'
+        paced = self.calm_period > 0.0
+        early_events_page = None
+        if paced:
+            source = 'events:' + rt.run_ref
+            early_events_page = self._call(rt.events.read, limit=PAGE_ROWS, cursor=self.outbox.cursor(source))
+            yield 'events'
+            self._record(records, 'events_head', {k: v for k, v in early_events_page.items()
+                                                  if k not in ('events', 'next_cursor', 'has_more')})
+            new_events = early_events_page.get('events') or []
+            if new_events:
+                self._record(records, 'events', early_events_page, append=True)
+                advances[source] = early_events_page['next_cursor']
+                if any(isinstance(ev, dict) and ev.get('kind') in self.DISCRETE_THREAT_EVENTS for ev in new_events):
+                    self._combat_until = max(self._combat_until, now + self.combat_hold_seconds)
+            if self._has_visible_enemy(self.last_view):
+                self._combat_until = max(self._combat_until, now + self.combat_hold_seconds)
+            discrete_wake = (len(records) > before_discrete or bool(new_events)
+                             or bool(early_events_page.get('has_more')))
+            need_continuous = (force or discrete_wake or now >= self._next_continuous_due
+                               or now < self._combat_until or self.last_view is None
+                               or self.last_own is None
+                               or (callable(getattr(api, 'resource_sites', None)) and self.last_resources is None))
+            if not need_continuous:
+                more_local = False
+                if self.name_refresh:
+                    more_local = self._drain_name_refresh(api, records, advances) or more_local
+                    yield 'remembered_building_kind'
+                if self.selectors:
+                    more_local = self._drain_experience_selectors(rt, records) or more_local
+                    yield 'experience'
+                if more_local:
+                    self.next_due = now
+                if records:
+                    self.publish(records, advances=advances)
+                elif advances:
+                    self.outbox.advance(advances)
+                self._scan_records = self._scan_advances = None
+                return
         self._record(records, 'minimap_geometry', self._call(api.minimap_geometry))
         yield 'minimap_geometry'
         self._record(records, 'resources', self._call(api.resources))
@@ -1088,9 +2016,14 @@ class AutomaticInformation:
             self._record(records,'resource_sites',self._call(resource_sites,
                 unit_budget=UNIT_CAPACITY,include_selected_amount=False))
             yield 'resource_sites'
-        self._record(records, 'own_units', text_read(api.own_units, unit_budget=UNIT_CAPACITY, encoding='cp1252'))
+        own_units = text_read(api.own_units, unit_budget=UNIT_CAPACITY, encoding='cp1252')
+        self._record(records, 'own_units', own_units)
         yield 'own_units'
-        selection = text_read(api.current_selection, encoding='cp1252')
+        selection_args = {'encoding':'cp1252'}
+        if (isinstance(own_units, dict) and own_units.get('status') == 'observed'
+                and self._accepts_keyword(api.current_selection, 'reuse_own_snapshot')):
+            selection_args['reuse_own_snapshot'] = True
+        selection = text_read(api.current_selection, **selection_args)
         self._record(records, 'current_selection', selection)
         yield 'current_selection'
         selection_current = True
@@ -1101,6 +2034,7 @@ class AutomaticInformation:
             selection_current = (current.get('epoch') == selected.get('epoch') and
                                  current.get('selection_generation') == selected.get('generation') and
                                  current.get('selection_count') == selected.get('count'))
+        card = None
         if not selection_current:
             # A foreground action may have changed selection after this scan
             # yielded. Do not clear its newly returned enabled-button cache.
@@ -1123,7 +2057,12 @@ class AutomaticInformation:
             yield 'command_card'
             sites=getattr(api,'build_sites',None)
             if callable(sites):
-                self._record(records,'build_sites',text_read(sites,encoding='cp1252'))
+                if self._build_sites_active(card, self.target_mode):
+                    self._record(records,'build_sites',text_read(sites,encoding='cp1252'))
+                else:
+                    # Never pre-scan idle/mining/combat or ordinary selections.
+                    self._record(records,'build_sites',{'status':'unavailable',
+                        'reason':'not_in_build_or_land_mode'})
             yield 'build_sites'
         else:
             rt.buttons.clear()
@@ -1138,11 +2077,11 @@ class AutomaticInformation:
         memory_start = self.outbox.cursor(memory_source) or 0
         memory = text_read(api.remembered_building_changes, limit=PAGE_ROWS, after_sequence=memory_start)
         yield 'remembered_building_changes'
-        if memory.get('buildings') or memory.get('status') != 'observed':
+        filtered_memory = self._remembered_buildings_update(
+            memory, memory_source, memory_start, advances)
+        if filtered_memory.get('buildings') or filtered_memory.get('status') != 'observed':
             # Upserts use stable public record tokens. Keep no old page cache.
-            self._record(records,'remembered_buildings',memory,append=True,update='upsert')
-        if memory.get('status') == 'observed' and memory.get('checkpoint',memory_start) != memory_start:
-            advances[memory_source] = memory['checkpoint']
+            self._record(records,'remembered_buildings',filtered_memory,append=True,update='upsert')
         # Native type capacity is 228. This small current-name map is not a
         # building-history cache. A newly lawfully learned label enriches old
         # last-seen rows through the indexed kind feed, even when no building
@@ -1156,25 +2095,24 @@ class AutomaticInformation:
                     self.name_refresh[kind]=(name_key,(checkpoint or {}).get('after',0))
         names_more=False
         if self.name_refresh:
-            kind=next(iter(self.name_refresh))
-            name_key,after=self.name_refresh[kind]
-            named=text_read(api.remembered_building_kind,kind=kind,limit=PAGE_ROWS,after_sequence=after)
+            names_more = self._drain_name_refresh(api, records, advances)
             yield 'remembered_building_kind'
-            if named.get('buildings') or named.get('status')!='observed':
-                self._record(records,'remembered_buildings',named,append=True,update='upsert')
-            if named.get('status')=='observed':
-                complete=not named.get('has_more')
-                advances[name_key]={'after':named['checkpoint'],'complete':complete}
-                if complete:del self.name_refresh[kind]
-                else:self.name_refresh[kind]=(name_key,named['checkpoint'])
-            names_more=bool(self.name_refresh)
-        source = 'events:' + rt.run_ref
-        page = self._call(rt.events.read, limit=PAGE_ROWS, cursor=self.outbox.cursor(source))
-        yield 'events'
-        self._record(records, 'events_head', {k: v for k, v in page.items() if k not in ('events', 'next_cursor', 'has_more')})
-        if page.get('events'):
-            self._record(records, 'events', page, append=True)
-            advances[source] = page['next_cursor']
+        if early_events_page is not None:
+            page = early_events_page
+        else:
+            source = 'events:' + rt.run_ref
+            page = self._call(rt.events.read, limit=PAGE_ROWS, cursor=self.outbox.cursor(source))
+            yield 'events'
+            self._record(records, 'events_head', {k: v for k, v in page.items() if k not in ('events', 'next_cursor', 'has_more')})
+            if page.get('events'):
+                self._record(records, 'events', page, append=True)
+                advances[source] = page['next_cursor']
+                if any(isinstance(ev, dict) and ev.get('kind') in self.DISCRETE_THREAT_EVENTS for ev in page['events']):
+                    self._combat_until = max(self._combat_until, now + self.combat_hold_seconds)
+        if paced:
+            if self._has_visible_enemy(self.last_view):
+                self._combat_until = max(self._combat_until, now + self.combat_hold_seconds)
+            self._next_continuous_due = now + (self.period if now < self._combat_until else self.calm_period)
         views = text_read(api.list_views)
         self._record(records, 'list_views', views)
         yield 'list_views'
@@ -1201,15 +2139,9 @@ class AutomaticInformation:
         # Stored claims remain author-authored. Selection of relevant history is
         # automatic and one page per cycle; a cursor never reaches the Agent.
         if self.selectors:
-            selector, cursor = self.selectors.pop(0)
-            exp = text_read(rt.experience.read, limit=PAGE_ROWS, cursor=cursor, **selector)
-            yield 'experience'
-            if exp.get('entries'):
-                self._record(records, 'experience', exp, append=True)
-            if exp.get('has_more'):
-                self.selectors.insert(0, (selector, exp['next_cursor']))
-            if self.selectors:
+            if self._drain_experience_selectors(rt, records):
                 self.next_due = now
+            yield 'experience'
         if records:
             self.publish(records, advances=advances)
         elif advances:

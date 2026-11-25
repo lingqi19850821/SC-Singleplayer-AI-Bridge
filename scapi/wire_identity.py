@@ -39,11 +39,29 @@ def normalize_identity(value):
     return {**value, 'process_creation': creation_integer(value['process_creation'])}
 
 
+_CHAIN_REF_SENTINELS = frozenset(('$prev_selection', '$prev_target'))
+
+
 def decode_request(request):
     """Normalize only the executable identity argument belonging to this operation."""
     if (not isinstance(request, dict) or not isinstance(request.get('op'), str)
             or not isinstance(request.get('args'), dict)):
         return request
+    if request['op'] == 'action_chain':
+        steps = request['args'].get('steps')
+        if not isinstance(steps, list):
+            return request
+        decoded_steps = []
+        for step in steps:
+            if (isinstance(step, dict) and isinstance(step.get('op'), str)
+                    and isinstance(step.get('args'), dict)):
+                step_key = _REQUEST_KEYS.get(step['op'])
+                if step_key is not None and step_key in step['args']:
+                    value = step['args'][step_key]
+                    if not (isinstance(value, str) and value in _CHAIN_REF_SENTINELS):
+                        step = {**step, 'args': {**step['args'], step_key: normalize_identity(value)}}
+            decoded_steps.append(step)
+        return {**request, 'args': {**request['args'], 'steps': decoded_steps}}
     key = _REQUEST_KEYS.get(request.get('op'))
     if key is None or key not in request['args']:
         return request
@@ -68,6 +86,10 @@ def _encode_result(value):
             result[key] = [{**row, ticket_key: _encode_identity(row[ticket_key])}
                            if isinstance(row, dict) and ticket_key in row else row
                            for row in result[key]]
+    if isinstance(result.get('steps'), list):
+        result['steps'] = [{**row, 'result': _encode_result(row['result'])}
+                           if isinstance(row, dict) and 'result' in row else row
+                           for row in result['steps']]
     return result
 
 
@@ -75,7 +97,8 @@ def _encode_record(value):
     if not isinstance(value, dict):
         return value
     result = dict(value)
-    if value.get('source') in _TICKET_SOURCES and 'result' in value:
+    source = value.get('source')
+    if isinstance(source, str) and source in _TICKET_SOURCES and 'result' in value:
         result['result'] = _encode_result(value['result'])
     if 'observed_selection' in value:
         result['observed_selection'] = _encode_identity(value['observed_selection'])

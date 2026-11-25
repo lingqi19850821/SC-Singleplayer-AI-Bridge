@@ -37,7 +37,7 @@ Use explicit configuration owned by the host. Model action requests must not sup
 | `tcc_exe` | An existing **32-bit x86 TinyCC** executable with its accompanying headers and libraries. Compiler architecture differs from Python architecture. |
 | `game_exe` | The current adapter is for the specific StarCraft **1.05 x86** layout at **`D:/Starcraft/starcraft.exe`**. It is not a generic BWAPI/Remastered adapter. |
 | `profile_id` | A nonempty, stable identifier for this user's legitimate knowledge/profile stores. |
-| profile database paths | Explicit writable paths for knowledge, bookmarks, building memory, lifecycle and durable delivery. Preserve the intended profile; do not erase learning to make startup succeed. |
+| profile database paths | Explicit writable paths for knowledge, optional shared knowledge, bookmarks, building memory, lifecycle, durable delivery and per-role episode/global experience. Preserve the intended profile; do not erase learning to make startup succeed. |
 | `save_dir` | The existing save directory for the actual game installation, verified by the host. `Lifecycle` requires it even when no optional menu capability is advertised. |
 | session identity | Fresh PID, exact process creation FILETIME and current native epoch. PID alone is insufficient. |
 | action interval | Explicit integer milliseconds, at least **334**, less than `2**31`. Camera, selection and commands share the action budget. |
@@ -51,7 +51,7 @@ If the game path/version/layout differs, report that compatibility prerequisite.
 These commands are for a future setup task authorized by the user. `$Python` and `$Tcc` below mean the absolute executable paths you have actually discovered; resolve them before running the commands. The working directory is `repo_root`.
 
 ```powershell
-& $Python -B -c "from scapi import Stage5, SelectionTicket, ButtonTicket, TargetTicket, ProductionTicket, CargoTicket; from scapi.player_runtime import ReadyRuntime; print('API imports OK; no game attachment attempted')"
+& $Python -B -c "from scapi import Stage5, SelectionTicket, ButtonTicket, TargetTicket, ProductionTicket, CargoTicket; from scapi.player_runtime import ReadyRuntime; from scapi.experience import ExperienceStore, execute_role_experience; print('API imports OK; no game attachment attempted')"
 ```
 
 ```powershell
@@ -60,12 +60,14 @@ These commands are for a future setup task authorized by the user. `$Python` and
 
 The default build creates:
 
-- `build/stage5/scapi_stage5_v49_minimap_ping.dll`
-- `build/stage5/stage5_loader_v49_minimap_ping.exe`
+- `build/stage5/scapi_stage5_v53_stability.dll`
+- the byte-identical `build/stage5/scapi_stage5_v53_next_episode.dll`
+- `build/stage5/stage5_loader_v53_stability.exe`
+- `build/stage5/stage5_loader_v53_next_episode.exe`
 
-[The builder](../tools/build_native.py) compiles, checks PE32/x86 output and verifies the loader's embedded exact DLL path. It does not execute the loader. It refuses existing outputs and competing build ownership. Do not delete a lock or overwrite an image merely to retry a build; determine who owns it and whether an image may still be resident. `--output-dir` is useful for isolated compilation, but default clients and loader preparation accept specific approved paths. An arbitrary successful build directory is not automatically a supported live installation.
+[The builder](../tools/build_native.py) compiles, checks PE32/x86 output and verifies each loader's embedded exact DLL path. It does not execute the loader. It refuses existing outputs and competing build ownership. Do not delete a lock or overwrite an image merely to retry a build; determine who owns it and whether an image may still be resident. `--output-dir` is useful for isolated compilation, but default clients and loader preparation accept specific approved paths. An arbitrary successful build directory is not automatically a supported live installation.
 
-Use **v49 / ABI 27** for the integration described here. `--visible-phase-diagnostic` builds a separate v50 / ABI 28 diagnostic candidate. The current `NativeCleanupAttempt` verifier explicitly requires v49 / ABI 27 / 676-byte state; a v50 build is not a drop-in end-to-end replacement.
+Use **v53 / ABI 27** for the integration described here; the candidate set is the 676-byte `ScapiState` stability and next-episode pair. `--visible-phase-diagnostic` builds a separate **v50 / ABI 28** diagnostic candidate. The current `NativeCleanupAttempt` verifier supports v53 / ABI 27 and retains v52/v51/v49 legacy candidate recognition; a v50 build is not a drop-in end-to-end replacement.
 
 Import success is a local dependency result. `Stage5(pid, ...)` is not an import check: it opens a real bridge connection, creates/opens stores and starts owned workers, including the game-exit cursor reset waiter. Do not construct it until the host preparation below is complete.
 
@@ -83,7 +85,7 @@ The host must provide the following implementation, or prove that an existing ho
 | Responsibility | Repository primitive | Host work still required |
 | --- | --- | --- |
 | Prepare native execution | [`prepare_loader_runtime`](../tools/native_loader_runtime.py) | Verify game identity/layout and installation state; preserve pre-install originals; launch and own the actual loader process. |
-| Capture events | [`StreamReader`, collector `main`](../tools/stage4_event_collector.py), [`Journal`](../tools/stage4_event_journal.py) | Match v49 client, manage collector startup/handshake/exit and persist before native ACK. |
+| Capture events | [`StreamReader`, collector `main`](../tools/stage4_event_collector.py), [`Journal`](../tools/stage4_event_journal.py) | Match the v53 client, manage collector startup/handshake/exit and persist before native ACK. |
 | Public API | [`Stage5`](../scapi/stage5.py) | Choose stores, preserve identity and serialize access on its owning worker. |
 | Request boundary | [`ReadyRuntime`](../scapi/player_runtime.py) | Supply bound API/events/lifecycle, log, profile and run; implement model/tool transport. |
 | Automatic information | [`AutomaticInformation`, `DeliveryOutbox`](../scapi/automatic_information.py) | Schedule sampling and implement durable publisher, transport receipts and delivery effects. |
@@ -95,7 +97,7 @@ The host must provide the following implementation, or prove that an existing ho
 ### 4.1 Prepare and install the native bridge
 
 1. Verify the actual game path, PID, creation time, supported layout, existing resident images and absence of an unresolved previous installation attempt.
-2. Capture the real pre-install restoration baseline. Read `validate_original_snapshot` in the cleanup module before installing: it requires the current identity/run/candidate, protocol 27, state size 676, the 73 v49 code spans, ping ABI spans, IAT/system-module evidence and resident inventory. The snapshot must actually precede installation. This repository has no complete exported one-command baseline-capture/host launcher; implement this host preparation before proceeding.
+2. Capture the real pre-install restoration baseline. Read `validate_original_snapshot` in the cleanup module before installing: it requires the current identity/run/candidate, protocol 27, state size 676, the complete 73-span historical code inventory, five ping ABI spans, IAT/system-module evidence and resident inventory. The snapshot must actually precede installation. This repository has no complete exported one-command baseline-capture/host launcher; implement this host preparation before proceeding.
 3. Call `prepare_loader_runtime(source_loader)` with the approved loader path. It returns a `LoaderRuntime` object, not a path or dict. It creates a private execution copy and performs a real suspended-child token probe. Its `receipt` may say `status="ready"` while `game_access_verified` remains `False`.
 4. Use `LoaderRuntime.execution_path` for actual execution, call `mark_execution_started()` before attempting launch, and preserve exact argv plus stdout/stderr/exit and child-identity evidence. The [loader CLI](../native/stage3_loader.c) takes `PID ABSOLUTE_BUILT_DLL`. It validates the compiled DLL path and fixed game path; its PID argument does not replace the host's creation-time checks around execution.
 5. Distinguish confirmed loader exit, successful installation and healthy bridge observation. Call `close(completed=True)` only after an actual execution exit is confirmed; otherwise retain the unknown attempt with `close()` and its receipt. `NativeLoaderRuntimeError.receipt` carries failed preparation/cleanup evidence. Do not bypass this preparation by directly executing the original build output.
@@ -105,7 +107,7 @@ The game-exit cursor waiter uses `SPI_SETCURSORS` to reset the system pointer sc
 
 ### 4.2 Establish capture and session ownership
 
-For v49 use `tools.stage5_client.Client`. The collector's CLI defaults to a Stage4 client; do not run it unmodified and assume v49 compatibility.
+For v53 / ABI 27 use `tools.stage5_client.Client`. The collector's CLI defaults to a Stage4 client; do not run it unmodified and assume v53 compatibility. A v50 / ABI 28 diagnostic candidate requires its matching visible-phase transport instead; v52/v51/v49 artifacts remain recognized only for cleanup of prior attempts.
 
 Two integration choices exist:
 
@@ -136,6 +138,8 @@ api = Stage5(
     knowledge_path=knowledge_db,
     bookmark_path=bookmark_db,
     building_memory_path=building_memory_db,
+    shared_knowledge_path=shared_knowledge_db,
+    knowledge_mode="official_standard",
 )
 events = EventLog(journal_path, journal_run_id, encoding="cp1252")
 lifecycle = Lifecycle(lifecycle_db, profile_id=profile_id, save_dir=verified_save_dir)
@@ -147,12 +151,17 @@ runtime = ReadyRuntime(
     run_ref=run_ref,
     capabilities=implemented_menu_capabilities,
     diagnostics="minimal",
+    role_experience_paths=role_episode_dbs,
+    shared_experience_paths=role_shared_dbs,
+    shared_experience_profile="official_standard",
 )
 ```
 
 This is a construction fragment, not a standalone launcher. All argument variables above are host-owned prerequisites. Import `Stage5` from `scapi`, `EventLog` from `scapi.events`, `Lifecycle` from `scapi.lifecycle`, and `ReadyRuntime` from `scapi.player_runtime`. `private_log` is a writable text stream with `write()` and `flush()`; it is not the model response channel. Use only menu capabilities actually implemented by the host, or an empty tuple. Do not add Tutorial-specific budgets unless the user requested that scenario.
 
-`verified_session` must contain **exactly** `pid`, `process_creation`, `epoch`, each a positive Python integer. The method is `bind_session`, not `bind`. Bind only after real process/epoch verification and capture handshake. The profile must match across lifecycle/runtime/stores. A later `runtime.attach(...)` requires the previous API/events to have been suspended and a legitimately rebound lifecycle; it does not install or verify a new bridge for you.
+`shared_knowledge_path` is optional. With `knowledge_mode="official_standard"` it attaches a caller-supplied shared library of previously verified static unit, weapon, skill and supply facts, including lawfully learned `detector: True`. It does not preload a roster, encyclopedia or current unit truth. Use `isolated_scope` when shared static learning must remain disabled. The selected-panel two-second HUD dwell is camera-independent: camera movement alone does not restart it, while changed selection or visible rules require a fresh interval. A homogeneous selected own group of 2–12 units can learn shared command-card labels after its two-second dwell; those labels do not establish single-unit stats, cargo/production facts, current enabled state or action permission.
+
+`verified_session` must contain **exactly** `pid`, `process_creation`, `epoch`, each a positive Python integer. The method is `bind_session`, not `bind`. Bind only after real process/epoch verification and capture handshake. `lifecycle.profile` must equal the runtime `profile_id`; episode experience stores use that same episode profile, while their configured shared profile is separate. A later `runtime.attach(...)` requires the previous API/events to have been suspended and a legitimately rebound lifecycle; it does not install or verify a new bridge for you.
 
 ### 4.4 Deliver startup context and Tips, then enable actions
 
@@ -241,6 +250,30 @@ public_frame = encode_public_frame({
 
 The frame shape matters: passing a naked result dict to `encode_public_frame` does not select its response-encoding branch. Do not forward private logs, developer snapshots or diagnostic exceptions as player observations.
 
+### 5.5 Keep role experience in explicit episode and global scopes
+
+`role_experience_paths` and `shared_experience_paths` are role-keyed mappings using `operator`, `tactics` or `interaction`. `ReadyRuntime` creates one `ExperienceStore(store, *, profile_id, shared_store=None, shared_profile_id=None)` per configured role. The primary episode notebook is separate from the optional global notebook, with a distinct database and profile. Do not point two roles at one writable notebook or merge the scopes.
+
+Global notes are **not** preloaded automatically at session start. Query the global scope explicitly with `list(scope='global')` on that role's `ExperienceStore`, supplying the required `author_role` (for example `list(author_role=<role>, scope='global')`), or use a selected `read(..., scope='global')`; never enumerate the whole notebook as startup context. A promotion moves the latest episode revision into the shared global notebook only when that store is configured.
+
+`execute_role_experience(store, *, role, args, runtime_run_ref, offline=False)` is the validated role boundary for `record`, `revise`, `refute`, `promote`, `delete` and `list`. Keep `author_role` host-owned. The offline [role experience CLI](../tools/role_experience_cli.py) reads one JSON object from standard input and never attaches to a game:
+
+```powershell
+'{"operation":"list","scope":"global","limit":16}' | & $Python -B tools/role_experience_cli.py --role operator --shared-experience-dir "<ABSOLUTE_SHARED_DIR>"
+```
+
+In `official_standard` mode the CLI requires the explicit absolute shared directory. Offline requests can list or maintain global notes, but cannot write episode notes or promote without a connected episode; pass `scope='global'` for an offline `record`. Do not claim that the CLI starts or resumes gameplay.
+
+### 5.6 Interpret automatic terrain, stationarity and contacts
+
+`AutomaticInformation` publishes `screen_terrain` and `screen_terrain_creep` from lawful view samples. The screen form is compact: one character per 16x16px cell with an origin, rows, camera and overlays; current creep is distinct from last-observed fog creep. It is a screen projection, not a complete map, and missing cells remain unknown.
+
+`TerrainReference.read(args)` accepts `format='cells'` (default) or `format='grid'` for source terrain. The grid form renders a bounded rectangle from stored history, not from a current screen read; unstored tiles stay `?` and remembered creep remains fog creep.
+
+Eligible own-unit rows can carry a derived coarse `stationary_s` of `15`, `30`, `60`, `120`, `180`, `300` or `600` seconds. It is computed only from fresh unpaused own observations; observation gaps do not add time, and movement or disappearance removes the bucket. It is not a wall-clock history, an order history or proof that a unit is uncontrolled.
+
+A captured `offscreen_non_enemy_contact` event reports `relation` as `allied`, `rescuable` or `neutral`. It is informational, not an enemy threat; it identifies no attacker and grants no action permission.
+
 ## 6. Instructions for the game-playing AI
 
 Use the integration's advertised transport. Request schema:
@@ -309,13 +342,13 @@ Optional player requests `save_game`, `load_game`, `restart_mission` require act
 5. Before resuming after any resolved menu operation, including save/objectives, restore and verify capture and owned API workers. If `runtime.suspend()` was used, construct fresh API/EventLog objects and call `runtime.attach(...)` only after the verified capture handshake and applicable lifecycle binding. Complete startup delivery/readiness and restore the delivered settings before re-enabling actions. `host_finish` returning `gameplay` does not perform these steps; constructing fresh Python objects does not require reinstalling an already healthy resident image.
 6. Reconcile an unknown outcome only through `host_reconcile` with fresh independent evidence, not replayed menu input. Preserve the 300-second save cooldown and registered save-slot rules.
 
-Do not save, restart or enter the next mission merely because an operation is available. Follow the user's requested gameplay scope. Default v49 has no generally verified victory-detection promise; a v50 diagnostic field is not proof of automatic full-mission progression.
+Do not save, restart or enter the next mission merely because an operation is available. Follow the user's requested gameplay scope. Default v53 has no generally verified victory-detection promise; a v50 diagnostic field is not proof of automatic full-mission progression.
 
 ## 8. Stop and release ownership
 
 Design shutdown before enabling gameplay. `finish`, `runtime.finished`, `Stage5.close()`, a collector exit or a loader exit is not complete native withdrawal.
 
-For the current v49 binding:
+For the current v53 / ABI 27 binding:
 
 1. Freeze new player actions and stop scheduling new reads; disable action admission and settle/inspect in-flight work without replaying unknown operations.
 2. Stop the owned collector through its normal stop mechanism and await actual exit. Require matching identity/generation, successful capture stop, final durable drain, closed journal and no cleanup error. A final `running=False` flag alone is insufficient.
@@ -326,7 +359,7 @@ For the current v49 binding:
 
 Do not close the only client needed for restoration verification before cleanup finishes. Inspect `Stage5.close()` and `ReadyRuntime.suspend()` when wiring ownership: they have their own worker/store/disarm effects, and are not substitutes for the restoration protocol. Native images may remain inert until ordinary game exit.
 
-For a later mission, `build_episode_candidate(compiler=...)` creates a unique v49 image/loader pair and returns `(str(dll), Path(loader))`; it does not attach it. The host must bind all transports to that approved candidate, prove the previous image fully withdrawn, preserve old resident identities and establish a fresh installation/capture/runtime scope. Do not treat this helper as an unlimited, already validated cross-mission launcher.
+For a later mission, `build_episode_candidate(compiler=...)` creates a unique v53 image/loader pair and returns `(str(dll), Path(loader))`; v52/v51/v49 episode names remain recognized for cleanup only. It does not attach the candidate. The host must bind all transports to that approved candidate, prove the previous image fully withdrawn, preserve old resident identities and establish a fresh installation/capture/runtime scope. Do not treat this helper as an unlimited, already validated cross-mission launcher.
 
 ## 9. Verify and report at the achieved level
 

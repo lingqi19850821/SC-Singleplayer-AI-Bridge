@@ -18,6 +18,220 @@ def aligned(value):
     return type(value) is int and 0<=value<=0x7fffffe0 and value%32==0
 
 
+GRID_CELL_SIZE=16
+GRID_LEGEND='?=unexplored 0/1/2=ground_height R=ramp /=partial_edge #=solid_block ~=water_or_void; 1char=16px(4chars=64px); air crosses #/~'
+VOID_CATEGORIES=frozenset(('water','water_boundary','space','space_boundary',
+    'pit','pit_boundary','lava_or_magma','lava_or_magma_boundary','tar','tar_boundary'))
+
+
+def _matrix4(value):
+    if not isinstance(value,list) or len(value)!=4:return None
+    if any(not isinstance(row,list) or len(row)!=4 for row in value):return None
+    return value
+
+
+def _label_category(label):
+    if isinstance(label,dict):
+        category=label.get('category')
+        if isinstance(category,str):return category
+    return None
+
+
+def _surface_value(entry,key):
+    if not isinstance(entry,dict):return None
+    surface=entry.get('surface_observation')
+    if not isinstance(surface,dict):return None
+    item=surface.get(key)
+    if not isinstance(item,dict) or 'value' not in item:return None
+    return item['value']
+
+
+def _cell_symbol(walk,heights,ramps,category,cy,cx):
+    """One 16x16 cell from its four 8px subcells; unknown never becomes ground."""
+    walk=_matrix4(walk);heights=_matrix4(heights);ramps=_matrix4(ramps)
+    if walk is None or heights is None:return '?'
+    walkable_cnt=0;ramp_cnt=0;height=None
+    for dy in (0,1):
+        for dx in (0,1):
+            row,col=cy*2+dy,cx*2+dx
+            value=walk[row][col]
+            if type(value) is not bool:return '?'
+            if value:walkable_cnt+=1
+            level=heights[row][col]
+            if type(level) is not int or level not in (0,1,2):return '?'
+            height=level if height is None else min(height,level)
+            if ramps is not None and ramps[row][col] is True:ramp_cnt+=1
+    if ramp_cnt>0 and walkable_cnt>=2:return 'R'
+    if walkable_cnt==4:return str(height)
+    if walkable_cnt:return '/'
+    return '~' if category in VOID_CATEGORIES else '#'
+
+
+def _tile_symbols(walk,heights,ramps,category):
+    return [_cell_symbol(walk,heights,ramps,category,cy,cx)
+            for cy,cx in ((0,0),(0,1),(1,0),(1,1))]
+
+
+def _all_walk_true(walk):
+    walk=_matrix4(walk)
+    return walk is not None and all(value is True for row in walk for value in row)
+
+
+def _stored_entries(store,left,top,right,bottom):
+    """One bounded read of already-learned terrain; never native IO."""
+    db=getattr(store,'db',None);scope=getattr(store,'scope',None)
+    if db is None or not isinstance(scope,str):return {}
+    try:
+        rows=db.execute('SELECT y,x,payload FROM terrain_reference_v1 '
+                        'WHERE scope=? AND y>=? AND y<? AND x>=? AND x<? ORDER BY y,x',
+                        (scope,top,bottom,left,right)).fetchall()
+    except Exception:
+        return {}
+    result={}
+    for row in rows:
+        try:
+            y,x,payload=row
+            entry=json.loads(payload)
+        except (TypeError,ValueError):
+            continue
+        if isinstance(entry,dict):result[(x,y)]=entry
+    return result
+
+
+def _row_intervals(points):
+    by_row={}
+    for x,y in points:by_row.setdefault(y,[]).append(x)
+    result=[]
+    for y in sorted(by_row):
+        xs=sorted(set(by_row[y]));segments=[];start=previous=xs[0]
+        for x in xs[1:]:
+            if x==previous+32:
+                previous=x;continue
+            segments.append(str(start)+'-'+str(previous+32));start=previous=x
+        segments.append(str(start)+'-'+str(previous+32))
+        result.append('y'+str(y)+':'+','.join(segments))
+    return result
+
+
+def _ramp_boxes(cells):
+    seen=set();boxes=[]
+    for cell in sorted(cells,key=lambda value:(value[1],value[0])):
+        if cell in seen:continue
+        seen.add(cell);stack=[cell];xs=[];ys=[]
+        while stack:
+            x,y=stack.pop();xs.append(x);ys.append(y)
+            for point in ((x-16,y),(x+16,y),(x,y-16),(x,y+16)):
+                if point in cells and point not in seen:
+                    seen.add(point);stack.append(point)
+        boxes.append([min(xs),min(ys),max(xs)+16,max(ys)+16])
+    return sorted(boxes,key=lambda box:(box[1],box[0],box[3],box[2]))
+
+
+def _grid_payload(origin_x,origin_y,tiles_x,tiles_y,symbols,flags,
+                  camera=None,observed_tick_ms=None):
+    rows=[];ramp_cells=set();no_build=[];blocks_view=[];creep_current=[];creep_fog=[]
+    for tile_y in range(tiles_y):
+        y=origin_y+tile_y*32
+        # A 32px tile is a 2x2 block: two chars in each of two 16px rows.
+        lines=[[''],['']]
+        for tile_x in range(tiles_x):
+            x=origin_x+tile_x*32
+            values=symbols.get((x,y))
+            if not isinstance(values,list) or len(values)!=4:values=['?','?','?','?']
+            lines[0].extend(values[0:2]);lines[1].extend(values[2:4])
+            for index,symbol in enumerate(values):
+                if symbol=='R':
+                    ramp_cells.add((x+(index%2)*16,y+(index//2)*16))
+            flag=flags.get((x,y)) or {}
+            if flag.get('no_build') is True:no_build.append((x,y))
+            if flag.get('blocks_view') is True:blocks_view.append((x,y))
+            if flag.get('creep_current') is True:creep_current.append((x,y))
+            if flag.get('creep_fog') is True:creep_fog.append((x,y))
+        for subrow in (0,1):
+            text=''.join(lines[subrow])
+            rows.append('y'+str(y+subrow*16)+':'+' '.join(
+                text[index:index+4] for index in range(0,len(text),4)))
+    width_chars=tiles_x*2
+    payload={'status':'observed','origin':{'x':origin_x,'y':origin_y},
+             'cell_size_px':GRID_CELL_SIZE,'legend':GRID_LEGEND,
+             'x_axis':' '.join(str(origin_x+index*GRID_CELL_SIZE)
+                               for index in range(0,width_chars,4)),
+             'rows':rows}
+    if isinstance(camera,dict):payload['camera']=deepcopy(camera)
+    if type(observed_tick_ms) is int:payload['observed_tick_ms']=observed_tick_ms
+    ramps=_ramp_boxes(ramp_cells)
+    if ramps:payload['ramps']=ramps
+    if no_build:payload['no_build']=_row_intervals(no_build)
+    if blocks_view:payload['blocks_view']=_row_intervals(blocks_view)
+    if creep_current:payload['creep_current']=_row_intervals(creep_current)
+    if creep_fog:payload['creep_fog']=_row_intervals(creep_fog)
+    return payload
+
+
+def build_screen_terrain(terrain,store=None):
+    """Render the observed live/fog screen as compact 16x16px characters.
+
+    Current cells use live walkability so doors are visible immediately. Fog
+    cells use their static ground attachment, while remembered creep and an
+    unresolved terrain label may fall back to this scope's lawfully learned
+    SQLite history. Any missing 8px subcell keeps its 16px cell unknown.
+    """
+    if not isinstance(terrain,dict):return None
+    cells=terrain.get('cells')
+    if not isinstance(cells,list) or not cells:return None
+    observed=[]
+    for cell in cells:
+        if not isinstance(cell,dict):continue
+        if aligned(cell.get('x')) and aligned(cell.get('y')):observed.append(cell)
+    if not observed:return None
+    min_x=min(cell['x'] for cell in observed);max_x=max(cell['x'] for cell in observed)
+    min_y=min(cell['y'] for cell in observed);max_y=max(cell['y'] for cell in observed)
+    stored=_stored_entries(store,min_x,min_y,max_x+32,max_y+32)
+    symbols={};flags={}
+    for cell in observed:
+        x,y=cell['x'],cell['y']
+        # Real decoder cells always carry this key (including explicit None for
+        # a hidden representative). Absence is only a legacy synthetic fixture.
+        if 'explored' in cell and cell.get('explored') is not True:
+            symbols[(x,y)]=['?','?','?','?']
+            continue
+        visible=cell.get('currently_visible') is True
+        if visible:
+            walk=cell.get('walkable_8px')
+        else:
+            walk=cell.get('static_walkable_8px')
+            if walk is None:walk=cell.get('walkable_8px')
+        heights=cell.get('ground_height_8px')
+        ramps=cell.get('ramp_marked_8px')
+        category=_label_category(cell.get('terrain'))
+        entry=stored.get((x,y))
+        if category is None and isinstance(entry,dict):
+            geometry=entry.get('geometry')
+            if isinstance(geometry,dict):
+                category=_label_category(geometry.get('terrain'))
+        values=_tile_symbols(walk,heights,ramps,category)
+        symbols[(x,y)]=values
+        creep=cell.get('creep')
+        observation=cell.get('creep_observation')
+        creep_current=visible and creep is True and observation=='current'
+        creep_fog=(not visible and creep is True and observation=='last_observed')
+        if not visible and _surface_value(entry,'creep') is True:creep_fog=True
+        buildable=cell.get('terrain_buildable')
+        blocks_view=cell.get('blocks_view')
+        if not visible:
+            # Fog has no current building/view authority; retain only the
+            # last-observed map facts already in this scope's history.
+            if buildable is None:buildable=_surface_value(entry,'terrain_buildable')
+            if blocks_view is None:blocks_view=_surface_value(entry,'blocks_view')
+        flags[(x,y)]={'no_build':_all_walk_true(walk) and buildable is False
+                                  and not all(value=='R' for value in values),
+                      'blocks_view':blocks_view is True,
+                      'creep_current':creep_current,'creep_fog':creep_fog}
+    return _grid_payload(min_x,min_y,(max_x-min_x)//32+1,(max_y-min_y)//32+1,
+                         symbols,flags,camera=terrain.get('camera'),
+                         observed_tick_ms=terrain.get('observed_tick_ms'))
+
+
 def merge_known(old,new):
     """Unknown/obscured subcells do not erase legitimately learned geometry."""
     if new is None:return deepcopy(old)
@@ -305,11 +519,74 @@ class TerrainReference:
         signature=hmac.new(self.knowledge.salt.encode(),body,hashlib.sha256).digest()[:16]
         return base64.urlsafe_b64encode(signature+body).decode().rstrip('=')
 
+    def read_grid(self,args):
+        """Render one bounded rectangle entirely from last-observed SQLite rows.
+
+        This is history, never a current screen: every remembered creep tile is
+        creep_fog, and a rectangle tile with no stored row is unknown.
+        """
+        bad={'status':'rejected','reason':'invalid_reference_arguments','source':'terrain'}
+        if not isinstance(args,dict):return bad
+        if args.get('source','terrain')!='terrain' or args.get('format','grid')!='grid':return bad
+        if args.get('layer') not in (None,'terrain'):return bad
+        if set(args)-{'source','format','layer','rect','limit'}:return bad
+        if 'x' in args or 'y' in args or 'cursor' in args:return bad
+        rect=args.get('rect')
+        if (not isinstance(rect,dict) or set(rect)!={'left','top','right','bottom'}
+                or not all(aligned(rect[key]) for key in ('left','top','right','bottom'))
+                or rect['left']>=rect['right'] or rect['top']>=rect['bottom']):return bad
+        tiles_x=(rect['right']-rect['left'])//32
+        tiles_y=(rect['bottom']-rect['top'])//32
+        if tiles_x*tiles_y>1024:return bad
+        limit=args.get('limit',32)
+        if type(limit) is not int or not 1<=limit<=64:return bad
+        rows=self.db.execute('SELECT y,x,payload FROM terrain_reference_v1 '
+                             'WHERE scope=? AND y>=? AND y<? AND x>=? AND x<? ORDER BY y,x',
+                             (self.scope,rect['top'],rect['bottom'],
+                              rect['left'],rect['right'])).fetchall()
+        stored={}
+        for y,x,payload in rows:
+            entry=json.loads(payload)
+            if isinstance(entry,dict):stored[(x,y)]=entry
+        symbols={};flags={}
+        for y in range(rect['top'],rect['bottom'],32):
+            for x in range(rect['left'],rect['right'],32):
+                entry=stored.get((x,y))
+                if entry is None:
+                    symbols[(x,y)]=['?','?','?','?']
+                    continue
+                geometry=entry.get('geometry')
+                if not isinstance(geometry,dict):geometry={}
+                values=_tile_symbols(geometry.get('walkable_8px'),
+                    geometry.get('ground_height_8px'),geometry.get('ramp_marked_8px'),
+                    _label_category(geometry.get('terrain')))
+                symbols[(x,y)]=values
+                flags[(x,y)]={'no_build':_all_walk_true(geometry.get('walkable_8px'))
+                                  and _surface_value(entry,'terrain_buildable') is False
+                                  and not all(value=='R' for value in values),
+                              'blocks_view':_surface_value(entry,'blocks_view') is True,
+                              'creep_current':False,
+                              'creep_fog':_surface_value(entry,'creep') is True}
+        payload=_grid_payload(rect['left'],rect['top'],tiles_x,tiles_y,symbols,flags)
+        payload.update(status='ok',source='terrain',format='grid',
+                       coordinate_system='world_pixels')
+        return payload
+
     def read(self,args):
         bad={'status':'rejected','reason':'invalid_reference_arguments','source':'terrain'}
-        if isinstance(args,dict) and args.get('source')=='terrain' and args.get('layer')=='resources':return self._read_resources(args)
-        if isinstance(args,dict) and args.get('layer')=='terrain':args={key:value for key,value in args.items() if key!='layer'}
-        if not isinstance(args,dict) or set(args)-{'source','x','y','rect','cursor','limit'} or args.get('source')!='terrain':return bad
+        if not isinstance(args,dict):return bad
+        value=args.get('format','cells')
+        if value not in ('cells','grid'):return bad
+        if args.get('source')!='terrain':return bad
+        if args.get('layer')=='resources':
+            if value=='grid':return bad
+            return self._read_resources({key:item for key,item in args.items() if key!='format'})
+        if value=='grid':return self.read_grid(args)
+        if args.get('layer')=='terrain':
+            args={key:value for key,value in args.items() if key not in ('layer','format')}
+        else:
+            args={key:value for key,value in args.items() if key!='format'}
+        if set(args)-{'source','x','y','rect','cursor','limit'} or args.get('source')!='terrain':return bad
         limit=args.get('limit',32)
         if type(limit) is not int or not 1<=limit<=64:return bad
         single='x' in args or 'y' in args

@@ -1,4 +1,4 @@
-"""Owned-session v49 withdrawal, plus an independent read-only verifier.
+"""Owned-session v53 withdrawal, plus an independent read-only verifier.
 
 Import never connects, enumerates, loads a DLL, starts a process or sends an
 action. Call only from the authorized host worker with its already owned
@@ -14,12 +14,20 @@ from pathlib import Path, PureWindowsPath
 import struct
 from tools.native_episode_artifacts import approved_episode_candidate
 
-GAME = 'D:/Starcraft/starcraft.exe'
-# Modified 2026-11-16: resolve artifacts within this standalone checkout.
 ROOT = Path(__file__).resolve().parents[1]
-CANDIDATE = str(ROOT / 'build/stage5/scapi_stage5_v49_minimap_ping.dll')
-NEXT_CANDIDATE = str(ROOT / 'build/stage5/scapi_stage5_v49_next_episode.dll')
-ALLOWED_CANDIDATES = (CANDIDATE, NEXT_CANDIDATE)
+GAME = 'D:/Starcraft/starcraft.exe'
+CANDIDATE = str((ROOT / 'build/stage5/scapi_stage5_v53_stability.dll').resolve()).replace('\\', '/')
+NEXT_CANDIDATE = str((ROOT / 'build/stage5/scapi_stage5_v53_next_episode.dll').resolve()).replace('\\', '/')
+PRIOR_V52_CANDIDATE = str((ROOT / 'build/stage5/scapi_stage5_v52_cargo_stationary.dll').resolve()).replace('\\', '/')
+PRIOR_V52_NEXT_CANDIDATE = str((ROOT / 'build/stage5/scapi_stage5_v52_next_episode.dll').resolve()).replace('\\', '/')
+PRIOR_V51_CANDIDATE = str((ROOT / 'build/stage5/scapi_stage5_v51_perception_fixes.dll').resolve()).replace('\\', '/')
+PRIOR_V51_NEXT_CANDIDATE = str((ROOT / 'build/stage5/scapi_stage5_v51_next_episode.dll').resolve()).replace('\\', '/')
+PRIOR_V49_CANDIDATE = str((ROOT / 'build/stage5/scapi_stage5_v49_minimap_ping.dll').resolve()).replace('\\', '/')
+PRIOR_V49_NEXT_CANDIDATE = str((ROOT / 'build/stage5/scapi_stage5_v49_next_episode.dll').resolve()).replace('\\', '/')
+ALLOWED_CANDIDATES = (CANDIDATE, NEXT_CANDIDATE,
+                      PRIOR_V52_CANDIDATE, PRIOR_V52_NEXT_CANDIDATE,
+                      PRIOR_V51_CANDIDATE, PRIOR_V51_NEXT_CANDIDATE,
+                      PRIOR_V49_CANDIDATE, PRIOR_V49_NEXT_CANDIDATE)
 
 
 def approved_candidate(candidate):
@@ -68,7 +76,7 @@ def _binding(binding):
     _require(isinstance(binding.get('run_id'),str) and bool(binding['run_id']), 'run_id_required')
     for key in ('pid','process_creation','epoch','capture_generation'):
         _require(type(binding.get(key)) is int and binding[key]>0, 'invalid_binding_'+key)
-    _require(approved_candidate(binding.get('candidate','')), 'v49_candidate_required')
+    _require(approved_candidate(binding.get('candidate','')), 'approved_candidate_required')
 
 
 def _same_binding(actual, expected):
